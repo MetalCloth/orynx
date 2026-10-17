@@ -80,8 +80,9 @@ needed.
 Pixel clicks log a computer_target_preflight event with the target-area comparison,
 observation age, and whether a changed area settled before Oryn returned a new image.
 Single desktop key actions can log computer_ui_settle when their changed region needs
-another look. Repeated checks or action patterns log computer_progress_hint. These
-events describe harness behavior; they do not prove that the user's task succeeded.
+another look. Repeated checks or action patterns log computer_progress_hint; a passive
+check refused at the post-action limit logs computer_observation_refused. These events
+describe harness behavior; they do not prove that the user's task succeeded.
 The temporary comparison frames are not model attachments or saved images; a later
 fresh observation is saved when image logging is enabled.
 

@@ -88,7 +88,7 @@ The IDs below are invented. Suppose Brave is on workspace 3 and Blender is on wo
    `Brave: workspace=3, window_index=1, pid=4321` and
    `Blender: workspace=5, window_index=2`. It has no screenshot. A uniquely matched
    Brave window may also have `window_id=71`.
-2. `computer_act({"observation_id":"list-a","action":{"type":"focus_window","window_index":1}})`
+2. `computer_act({"observation_id":"list-a","action":{"type":"focus_window","window_index":1},"expected_result":"The selected app becomes the focused window"})`
    checks that the listed Brave window is still the same, focuses it, and returns a fresh
    screenshot and accessibility controls when CUA can match it. This is one action;
    no key or click is chained to the focus.
@@ -100,9 +100,14 @@ The IDs below are invented. Suppose Brave is on workspace 3 and Blender is on wo
    needs no `computer_task` record even if it takes several actions. For longer tasks,
    one `record` call can update multiple steps and checks, each with its own evidence.
 
+Every `computer_act` call needs an `expected_result` that describes the visible or native state
+expected after the input. Its result already includes a fresh observation. Up to two more
+`computer_observe` or `computer_wait` calls are allowed after that input; a third is refused
+until a new input, so the model must use the latest observation to continue or report a blocker.
+
 The input result `sent` means the dotool command completed. The model checks the resulting
-observation before claiming that the app changed. `refused` means Oryn stopped the requested
-input before dispatch; `unknown` means its occurrence is uncertain.
+observation before claiming that the app changed. For `computer_act`, `refused` means Oryn
+stopped the requested input before dispatch; `unknown` means its occurrence is uncertain.
 
 For longer tasks, `computer_task({"operation":"record","updates":[...]})` can mark up to
 eight steps and six done checks in one call. Each item names `kind` (`step` or `check`), a
