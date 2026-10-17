@@ -101,7 +101,7 @@ The model can request the first `computer_observe` in that same response. After 
 
 Each update names a current 1-based index and needs evidence when marked `verified` or `blocked`. One batch can cover up to eight steps and six checks; duplicate indices or invalid statuses reject the entire call before saving. The older flat record fields still work for existing callers. If the next input is already grounded in the last result, the model can put `record` before that input in the same response. Once the final result has been observed, it can put `record` and `finish` in one response. These calls must use evidence from an earlier tool result, never from an action in the same response. The record preserves progress if the chat turn is interrupted; the observed UI state remains the evidence for success.
 
-For a predictable browser navigation, the model can use one sequence after observing the local browser:
+When the current observation already determines a safe 2–3 input chain, the model should prefer one sequence over separate model turns. The action that submits or starts navigation is the final action; Oryn then returns one fresh observation before the next decision. Do not batch opening an unseen menu, overlay, or app with actions that depend on its new screen; inspect it first. For example, after observing the local browser:
 
 ```json
 {
