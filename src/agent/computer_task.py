@@ -11,10 +11,10 @@ def computer_task_schema() -> dict[str, Any]:
         "description": (
             "Save progress for computer work with multiple outcomes, multiple apps, or a likely need to "
             "resume later. One outcome, such as opening one file, needs no record even if it takes several "
-            "UI actions. Start with a goal, done checks, and short steps. Record all observed step/check "
-            "progress in one updates batch, with evidence inside each verified or blocked item; finish "
-            "only after checking the result. "
-            "The result lists remaining step/check indices. This stores the model's record, not an "
+            "UI actions. Start with a goal, distinctly named done checks, and distinctly named short steps. "
+            "Record all observed step/check progress in one updates batch, identifying each item by its exact name from the task record, "
+            "with evidence inside each verified or blocked item; finish only after checking the result. "
+            "The result lists remaining step/check names. This stores the model's record, not an "
             "automatic success verdict. "
             "The environment binds remote browser versus "
             "local desktop tools for this turn. mixed requires route_reason; record an upgrade "
@@ -27,20 +27,20 @@ def computer_task_schema() -> dict[str, Any]:
             "constraints": {"type": "array", "items": {"type": "string"},
                             "description": "Start only: user constraints, at most eight."},
             "done_checks": {"type": "array", "items": {"type": "string"},
-                            "description": "Start only: one to six observable success checks."},
+                            "description": "Start only: one to six uniquely named observable success checks."},
             "steps": {"type": "array", "items": {"type": "string"},
-                      "description": "Start only: one to eight short subgoals."},
+                      "description": "Start only: one to eight uniquely named short subgoals."},
             "environment": {"type": "string", "enum": ["local_desktop", "remote_browser", "mixed"],
                             "description": "Start, or record an upgrade to mixed: where the task's UI lives."},
             "route_reason": {"type": "string", "description": "Why the user's task needs both local and remote UI environments."},
             "updates": {"type": "array", "maxItems": 14, "items": {
                 "type": "object", "additionalProperties": False, "properties": {
                     "kind": {"type": "string", "enum": ["step", "check"]},
-                    "index": {"type": "integer", "description": "1-based step or done-check index matching remaining_steps or remaining_checks; the first item is 1, never 0."},
+                    "name": {"type": "string", "description": "Exact step or done-check name from the current task record; do not use a numeric position."},
                     "status": {"type": "string", "enum": ["pending", "working", "verified", "blocked"]},
                     "evidence": {"type": "string", "description": "Required for verified or blocked updates."},
-                }, "required": ["kind", "index", "status"],
-            }, "description": "Record only: put evidence in each item, not at the top level."},
+                }, "required": ["kind", "name", "status"],
+            }, "description": "Record only: use the exact step/check name shown in the saved task, e.g. {kind: step, name: Open Blender, status: verified}; put evidence in each item, not at the top level."},
             "evidence": {"type": "string", "description": "Finish only: what a fresh result showed; a completed task can reuse its verified done-check evidence."},
             "fact": {"type": "string", "description": "Record only: a fact to carry between apps."},
             "source": {"type": "string", "description": "Record only: where that fact came from."},
@@ -124,11 +124,16 @@ class ComputerTaskLedger:
             elif route_reason != "":
                 raise ValueError("route_reason is only for a mixed task.")
             steps = _texts(args.get("steps"), "steps", 8, required=True)
+            done_checks = _texts(args.get("done_checks"), "done_checks", 6, required=True)
+            if len({step.casefold() for step in steps}) != len(steps):
+                raise ValueError("Each step needs a distinct name so progress can identify it.")
+            if len({check.casefold() for check in done_checks}) != len(done_checks):
+                raise ValueError("Each done check needs a distinct name so progress can identify it.")
             state = {
                 "goal": _text(args.get("goal"), "goal", 500),
                 "constraints": _texts(args.get("constraints", []), "constraints", 8),
                 "done_checks": [{"description": item, "status": "pending", "evidence": ""}
-                                for item in _texts(args.get("done_checks"), "done_checks", 6, required=True)],
+                                for item in done_checks],
                 "environment": environment, "route_reason": route_reason,
                 "steps": [{"description": item, "status": "pending", "evidence": ""}
                           for item in steps],
@@ -188,20 +193,25 @@ class ComputerTaskLedger:
                         raise ValueError("updates needs 1–14 step/check changes.")
                     seen = set()
                     for update in updates:
-                        if (not isinstance(update, dict) or set(update) - {"kind", "index", "status", "evidence"}
-                                or not {"kind", "index", "status"} <= set(update)):
-                            raise ValueError("Each update needs kind, index, status, and optional evidence.")
-                        kind, index, status = update["kind"], update["index"], update["status"]
-                        if kind not in ("step", "check") or type(index) is not int:
-                            raise ValueError("Update kind must be step or check with a 1-based index.")
+                        if (not isinstance(update, dict) or set(update) - {"kind", "name", "status", "evidence"}
+                                or not {"kind", "name", "status"} <= set(update)):
+                            raise ValueError("Each update needs kind, name, status, and optional evidence.")
+                        kind, name, status = update["kind"], update["name"], update["status"]
+                        if kind not in ("step", "check"):
+                            raise ValueError("Update kind must be step or check.")
                         target = state["steps"] if kind == "step" else state["done_checks"]
-                        if not 1 <= index <= len(target) or (kind, index) in seen:
-                            range_name = "remaining_steps" if kind == "step" else "remaining_checks"
-                            raise ValueError(
-                                f"{kind} update index {index} is invalid or duplicated. Use a unique 1-based "
-                                f"index from 1 to {len(target)}, matching {range_name}."
-                            )
-                        seen.add((kind, index))
+                        name = _text(name, f"{kind} name", 200)
+                        name_key = name.casefold()
+                        matches = [item for item in target if item["description"].casefold() == name_key]
+                        if len(matches) != 1:
+                            available = [item["description"] for item in target if item["status"] != "verified"]
+                            if len(matches) > 1:
+                                raise ValueError(f"{kind.title()} name {name!r} is ambiguous; task item names must be distinct.")
+                            choices = "; ".join(available) if available else "none"
+                            raise ValueError(f"Unknown {kind} name {name!r}. Remaining {kind} names: {choices}.")
+                        if (kind, name_key) in seen:
+                            raise ValueError(f"Duplicate {kind} update for {name!r}; include it only once.")
+                        seen.add((kind, name_key))
                         allowed = ("working", "verified", "blocked") if kind == "step" else ("pending", "verified")
                         if status not in allowed:
                             raise ValueError("Update status is invalid for its step or done check.")
@@ -210,7 +220,7 @@ class ComputerTaskLedger:
                             item_evidence = _text(item_evidence, "evidence", 500)
                         elif "evidence" in update and item_evidence != "":
                             item_evidence = _text(item_evidence, "evidence", 500)
-                        target[index - 1].update(status=status, evidence=item_evidence if status != "pending" else "")
+                        matches[0].update(status=status, evidence=item_evidence if status != "pending" else "")
                         verified_step = verified_step or (kind == "step" and status == "verified")
                 if "fact" in args or "source" in args:
                     if len(state["facts"]) >= 12:
@@ -227,14 +237,14 @@ class ComputerTaskLedger:
                 result = args.get("result")
                 if result not in ("complete", "blocked"):
                     raise ValueError("Finish with result=complete or blocked.")
-                pending_steps = [str(index) for index, step in enumerate(state["steps"], 1)
+                pending_steps = [step["description"] for step in state["steps"]
                                  if step["status"] != "verified"]
-                pending_checks = [str(index) for index, check in enumerate(state["done_checks"], 1)
+                pending_checks = [check["description"] for check in state["done_checks"]
                                   if check["status"] != "verified"]
                 if result == "complete" and pending_steps:
-                    raise ValueError(f"Verify planned step(s) {', '.join(pending_steps)} before marking the task complete.")
+                    raise ValueError(f"Verify planned step(s) by name before marking the task complete: {'; '.join(pending_steps)}.")
                 if result == "complete" and pending_checks:
-                    raise ValueError(f"Verify done check(s) {', '.join(pending_checks)} before marking the task complete.")
+                    raise ValueError(f"Verify done check(s) by name before marking the task complete: {'; '.join(pending_checks)}.")
                 state["status"] = result
                 final_evidence = args.get("evidence")
                 if result == "complete" and not final_evidence:
@@ -246,9 +256,9 @@ class ComputerTaskLedger:
         if self.save:
             self.save(state)
         self.state = state
-        remaining_steps = [index for index, step in enumerate(state["steps"], 1)
+        remaining_steps = [step["description"] for step in state["steps"]
                            if step["status"] != "verified"]
-        remaining_checks = [index for index, check in enumerate(state["done_checks"], 1)
+        remaining_checks = [check["description"] for check in state["done_checks"]
                             if check["status"] != "verified"]
         return json.dumps({
             "task_recorded": True, "operation": operation, "status": state["status"],
