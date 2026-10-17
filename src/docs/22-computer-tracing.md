@@ -35,8 +35,11 @@ records its source observation, overview region, native monitor frame, and crop 
 A `focus_window` action
 records the selected window index, Hyprland outcome, and following observation. For other actions,
 it records the requested input, the dotool command/result, elapsed time, and whether the next
-observation included a screenshot. A focus/edit sequence shares one `action_id`; each attempted
-input has a step number and its own outcome, and one observation follows the sequence. Startup events measure the delay from submitting the turn to
+observation included a screenshot. A focus/edit sequence shares one `action_id`; each input has a
+step number and its own outcome, and one observation follows the sequence. `dispatch_mode` on the
+action start/result is `single_action`, `single_stream` (one Dotool process for a fixed same-window
+text sequence), or `step_checked` (each input is dispatched and target-checked separately). The
+Dotool elapsed time for `single_stream` covers the whole input stream. Startup events measure the delay from submitting the turn to
 the worker, first computer-driver startup, and model/tool-loop activity.
 `computer_task` updates appear as ordinary tool-call entries in the local trace. The current task record is stored in SQLite; the trace's bounded argument and result previews are not a replacement for that record.
 Each model request records preparation time separately from model-response time; failures and

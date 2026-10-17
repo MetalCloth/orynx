@@ -29,7 +29,7 @@ Use computer_task for multiple independent outcomes, work across apps, or a long
 
 Choose observation scope from the task before the current focus: use desktop first for a launcher or desktop overlay, active for work inside the already-focused app, and windows to locate an app already open across workspaces. Do not start with active and then recover to desktop for a launch task. Observe the active window with mode=active when the target is already focused; it binds its accessibility tree and screenshot in one tool call when CUA can match it. For another named app, windows lists Hyprland windows with workspaces; use its observation_id and window_index with a single focus_window action, then inspect the returned screenshot and accessibility state. A uniquely matched CUA pid/window_id can also be observed directly. Desktop accessibility labels are read-only: click_element needs a numbered control from a scope=window result; active mode can fall back to desktop. For a small or uncertain desktop target, zoom a region of the latest full desktop image with computer_observe(mode=desktop, observation_id=..., region={x,y,width,height}); the returned image has its own local click coordinates. Make at most one computer_act or computer_wait call per model response, using only the latest single-use observation_id; each result provides fresh state for the next decision. Read that returned state and use its new ID directly. After a UI-changing action, the returned screenshot may catch a transition even when controls are visible; if the target is clipped or its position is uncertain, observe again before clicking its coordinates. Otherwise do not call computer_observe just to check the action again. Observe again when it is still loading, lacks the needed image or scope, or is otherwise too ambiguous to choose the next input. Use min_age_ms only for a visible asynchronous change, with a delay justified by that change rather than a default pause. Never reuse a stale ID, window index, control index, or coordinate. For local desktop actions, prefer click_element for a matching enabled control from a scope=window result; otherwise use pixels from the matching attached screenshot. After a missed visual click, inspect the fresh image and zoom or choose another visible route before guessing nearby coordinates again. CUA observes and checks native predicates; Dotool sends clicks, keys, text, and scrolls. Hyprland focuses a selected window. For key chords use super+w; use leftmeta only as a standalone Super tap.
 
-Before every computer_act, state a short expected_result describing the visible or native state the returned observation should show; input being sent is not itself the expected result. When the latest observation already determines a safe 2–3 input chain on the same target, prefer one computer_act(actions=[...]) call over separate model turns. Examples: ctrl+l, type the requested URL, Enter; typing into an already-visible launcher; or a sequence of app shortcuts whose target state is already clear. Sequences may contain keys alone, optionally one single-line type step, and at most one opening click. Do not batch opening an unseen menu, overlay, or app with actions that depend on its new screen: open it, inspect the returned observation, then batch only once the target is visible and ready. The action that submits or starts navigation must be last; inspect the fresh result before acting again. Use one action when a later step depends on a new screen, or when focus, target, scrolling, or window changes are uncertain. Inspect the action outcome and fresh observation before deciding whether to retry. `sent` means the input command completed; inspect the fresh state to confirm its UI effect. `refused` means input was not sent; `unknown`, timeout, or cancellation may mean input was sent. After `target_focus_failed`, use the fresh observation returned with that result before choosing another action. Never replay uncertain input automatically. The computer_act result already contains a fresh observation. If it is still loading, lacks the needed image or scope, or is otherwise too ambiguous, use at most two follow-up computer_observe/computer_wait calls before deciding. After two, further passive checks are refused until a new input; use the latest observation to finish, take a different input, or report the blocker. Use min_age_ms only for a visible asynchronous change, with a delay justified by that change rather than a default pause. Computer actions run without a confirmation prompt; use computer_ask_user only when the task lacks information needed to choose a target or action. After computer_ask_user, use the fresh observation returned with the answer, or observe if none was returned. Claim completion only when fresh local evidence shows the requested state."""
+Before every computer_act, state a short expected_result describing the visible or native state the returned observation should show; input being sent is not itself the expected result. When the latest observation already determines a safe sequence of up to five inputs on the same target, prefer one computer_act(actions=[...]) call over separate model turns. Five is a ceiling, not a target: stop at a screen transition or whenever the next step depends on a result that is not visible yet. Examples: ctrl+l, type the requested URL, Enter; typing into an already-visible launcher; or a sequence of app shortcuts whose target state is already clear. Sequences may contain keys alone, optionally one single-line type step, and at most one opening click. A same-window text sequence (`type` then Enter, or `ctrl+l`, type, optional Enter) is sent through one Dotool process when grounded in an active/exact-window observation; its steps are not checked between keystrokes. Use that path only when no intermediate input can switch or close the target window. Other sequences keep per-step target checks. Do not batch opening an unseen menu, overlay, or app with actions that depend on its new screen: open it, inspect the returned observation, then batch only once the target is visible and ready. The action that submits or starts navigation must be last; inspect the fresh result before acting again. Use one action when a later step depends on a new screen, or when focus, target, scrolling, or window changes are uncertain. Inspect the action outcome and fresh observation before deciding whether to retry. `sent` means the input command completed; inspect the fresh state to confirm its UI effect. `refused` means input was not sent; `unknown`, timeout, or cancellation may mean input was sent. After `target_focus_failed`, use the fresh observation returned with that result before choosing another action. Never replay uncertain input automatically. The computer_act result already contains a fresh observation. If it is still loading, lacks the needed image or scope, or is otherwise too ambiguous, use at most two follow-up computer_observe/computer_wait calls before deciding. After two, further passive checks are refused until a new input; use the latest observation to finish, take a different input, or report the blocker. Use min_age_ms only for a visible asynchronous change, with a delay justified by that change rather than a default pause. Computer actions run without a confirmation prompt; use computer_ask_user only when the task lacks information needed to choose a target or action. After computer_ask_user, use the fresh observation returned with the answer, or observe if none was returned. Claim completion only when fresh local evidence shows the requested state."""
 
 
 COMPUTER_INSTRUCTIONS += (
@@ -73,12 +73,12 @@ def computer_tool_schemas() -> list[dict[str, Any]]:
                  "description": "Desktop mode only: rectangle in the latest full desktop screenshot's pixels. Returns one native-resolution crop; click x/y in the crop image."},
          }, "required": ["mode"]}},
         {"type": "function", "name": "computer_act", "description":
-         "Send one action, or a predictable 2–3 step focus/edit sequence, from the latest observation_id. Prefer one sequence over separate model turns when the latest observation already determines the whole chain; one fresh observation follows it. Do not batch opening an unseen menu, overlay, or app with actions that depend on its new screen. The action that submits or starts navigation must be last, with no actions after the expected screen change. Before every action, provide a short expected_result describing the visible or native state the returned observation should show. focus_window uses a window_index from a mode=windows observation, checks the selected Hyprland window, focuses it, and returns a fresh image and CUA tree when available; it cannot be chained. click_element needs scope=window and a numbered control, never desktop labels. Supply exactly one of action or actions. A sequence may contain keys alone, optionally one single-line type step, and at most one click first; it stops if the target changes or input is uncertain. It consumes the ID and returns each outcome plus one fresh observation. Inspect the returned state and never replay uncertain input. wait_for checks one native predicate; image=false skips the next screenshot only when that exact check succeeds. Computer input runs without a confirmation prompt.",
+         "Send one action, or a predictable sequence of up to five inputs, from the latest observation_id. Five is a ceiling, not a target; stop when a step changes the screen or the next action needs a new observation. Prefer one sequence over separate model turns when the latest observation already determines the whole sequence; one fresh observation follows it. Safe same-window text sequences (type then Enter, or ctrl+l then type and optional Enter) from active/exact-window observations run in one Dotool process; use them only when no intermediate input can switch or close the target window. Other sequences retain per-step target checks. Do not batch opening an unseen menu, overlay, or app with actions that depend on its new screen. The action that submits or starts navigation must be last, with no actions after the expected screen change. Before every action, provide a short expected_result describing the visible or native state the returned observation should show. focus_window uses a window_index from a mode=windows observation, checks the selected Hyprland window, focuses it, and returns a fresh image and CUA tree when available; it cannot be chained. click_element needs scope=window and a numbered control, never desktop labels. Supply exactly one of action or actions. A sequence may contain keys alone, optionally one single-line type step, and at most one click first; it stops if the target changes or input is uncertain. It consumes the ID and returns each outcome plus one fresh observation. Inspect the returned state and never replay uncertain input. wait_for checks one native predicate; image=false skips the next screenshot only when that exact check succeeds. Computer input runs without a confirmation prompt.",
          "parameters": {"type": "object", "additionalProperties": False, "properties": {
              "observation_id": {"type": "string", "description": "ID from the latest observation, including the fresh observation returned by computer_act; single use."},
              "action": action_schema,
-             "actions": {"type": "array", "items": action_schema,
-                         "description": "Use for a fully predictable 2–3 input chain from the latest observation. Key-only chains are allowed; optionally include one single-line type step and at most one opening click, first. Examples: ctrl+l, type a URL, enter; or type an app into an already visible, focused launcher search and press enter. Do not batch actions that depend on an unseen menu or overlay. Keep navigation/submission last; inspect its returned observation before the next action. No scrolling or repeated typing."},
+             "actions": {"type": "array", "minItems": 2, "maxItems": 5, "items": action_schema,
+                         "description": "Use for a predictable 2–5 input sequence from the latest observation. Five is a ceiling, not a target; stop at a screen transition or whenever the next step depends on a result that is not visible yet. Key-only chains are allowed; optionally include one single-line type step and at most one opening click, first. Safe same-window text patterns (type then Enter, or ctrl+l then type and optional Enter) from active/exact-window observations run as one Dotool stream with no intermediate target check; use only when no earlier input can switch or close the target window. Other sequences keep per-step target checks. Examples: ctrl+l, type a URL, enter; or type an app into an already visible, focused launcher search and press enter. Do not batch actions that depend on an unseen menu or overlay. Keep navigation/submission last; inspect its returned observation before the next action. No scrolling or repeated typing."},
              "expected_result": {"type": "string", "minLength": 1, "maxLength": 300,
                                  "description": "Required for every action: short visible or native result expected in the returned observation, such as the target window becoming focused or a Save confirmation appearing."},
              "wait_for": {"type": "object", "description":
@@ -851,8 +851,9 @@ class ComputerSession:
         if "action" in args:
             return [ComputerSession._action(snapshot, args["action"])]
         values = args["actions"]
-        if not isinstance(values, list) or not 2 <= len(values) <= 3:
-            raise ValueError("actions must contain 2–3 steps; use action for one input.")
+        # shortcut: cap each grounded segment at five inputs; raise only if reliability evaluations support it.
+        if not isinstance(values, list) or not 2 <= len(values) <= 5:
+            raise ValueError("actions must contain 2–5 steps; use action for one input.")
         actions = [ComputerSession._action(snapshot, value) for value in values]
         kinds = [action["type"] for action in actions]
         if (kinds.count("type") > 1 or any(kind not in {"click_element", "click", "key", "type"} for kind in kinds)
@@ -862,6 +863,48 @@ class ComputerSession:
                        for action in actions[:-1])):
             raise ValueError("Sequences allow keys and at most one single-line type step, with at most one opening click; Enter must be last")
         return actions
+
+    @staticmethod
+    def _batchable_keyboard_sequence(snapshot: dict, actions: list[dict]) -> bool:
+        """Only combine fixed text-entry sequences that cannot switch windows mid-run."""
+        if snapshot.get("mode") not in {"active", "window"} or snapshot.get("pid") is None:
+            return False
+        types = [action["type"] for action in actions]
+        if types == ["type", "key"]:
+            return actions[-1]["key"].casefold() == "enter"
+        if len(actions) == 2:
+            return types == ["key", "type"] and actions[0]["key"].casefold() == "ctrl+l"
+        return (
+            len(actions) == 3 and types == ["key", "type", "key"]
+            and actions[0]["key"].casefold() == "ctrl+l"
+            and actions[-1]["key"].casefold() == "enter"
+        )
+
+    def _dotool_keyboard_sequence(
+        self, snapshot: dict, actions: list[dict], trace_context: dict[str, Any],
+    ) -> None:
+        try:
+            self._focus_for_dotool(snapshot)
+        except InterruptedError:
+            raise
+        except ActionNotDispatched:
+            raise
+        except (RuntimeError, ValueError) as exc:
+            raise ActionNotDispatched(
+                "dotool", "target_focus_failed",
+                f"The target could not be focused safely, so the requested input was not sent. {exc} Observe again.",
+            ) from exc
+        self._check_cancel()
+        steps = [
+            ("hotkey", {"key": action["key"]}) if action["type"] == "key"
+            else ("type", {"content": action["text"]})
+            for action in actions
+        ]
+        HyprlandDriver.execute_sequence(
+            self.driver, steps,
+            trace_context={**trace_context, "step_index": 1, "step_count": len(actions),
+                           "dispatch_mode": "single_stream"},
+        )
 
     def _check_desktop_stamp(self, snapshot: dict, route: str) -> None:
         try:
@@ -1402,6 +1445,10 @@ class ComputerSession:
             raise ValueError("Invalid computer_act arguments.")
         snapshot = self._require_snapshot(args.get("observation_id"))
         actions = self._actions(snapshot, args)
+        batch_sequence = self._batchable_keyboard_sequence(snapshot, actions)
+        dispatch_mode = "single_stream" if batch_sequence else (
+            "step_checked" if len(actions) > 1 else "single_action"
+        )
         expected_result = args.get("expected_result", "")
         if not isinstance(expected_result, str) or len(expected_result) > 300:
             raise ValueError("expected_result must be at most 300 characters.")
@@ -1437,33 +1484,61 @@ class ComputerSession:
                 scope=snapshot.get("mode"), pid=snapshot.get("pid"),
                 window_id=snapshot.get("window_id"), image_scope=snapshot.get("image_scope"),
                 image_size=snapshot.get("size"), window_bounds=snapshot.get("bounds"),
+                dispatch_mode=dispatch_mode,
             )
         outcomes = []
-        for step, action in enumerate(actions, 1):
-            step_context = {**trace_context, "step_index": step, "step_count": len(actions)}
+        if batch_sequence:
             try:
-                self._check_cancel()
-                if step > 1:
-                    self._check_sequence_target(snapshot)
-                if action["type"] == "focus_window":
-                    outcome = self._focus_window(snapshot, action)
-                elif action["type"] in {"click_element", "click", "double_click"}:
-                    outcome = self._click(snapshot, action, trace_context=step_context)
-                else:
-                    outcome = self._dotool(snapshot, action, trace_context=step_context)
+                self._dotool_keyboard_sequence(snapshot, actions, trace_context)
             except InterruptedError:
                 raise
             except ActionNotDispatched as exc:
-                outcome = {"effect": "refused", "route": exc.route, "reason": exc.reason,
-                           "message": str(exc)}
+                outcomes = [{"effect": "refused", "route": exc.route, "reason": exc.reason,
+                             "message": str(exc)} for _ in actions]
             except (RuntimeError, ValueError) as exc:
-                outcome = {"effect": "unknown", "error": str(exc),
-                           "message": "Input may or may not have occurred. Inspect fresh state before retrying."}
-            outcomes.append(outcome)
-            if self.trace:
-                self.trace.write("computer_action_result", **step_context, action=action, outcome=outcome)
-            if outcome["effect"] in {"refused", "unknown"}:
-                break
+                outcomes = [{"effect": "unknown", "error": str(exc),
+                             "message": "Some or all sequence inputs may have occurred. Inspect fresh state before retrying."}
+                            for _ in actions]
+            else:
+                outcomes = [{"effect": "sent", "route": "dotool",
+                             "message": "Input command completed; inspect fresh state before repeating."}
+                            for _ in actions]
+            for step, (action, outcome) in enumerate(zip(actions, outcomes), 1):
+                if self.trace:
+                    self.trace.write(
+                        "computer_action_result", **trace_context,
+                        step_index=step, step_count=len(actions), dispatch_mode="single_stream",
+                        action=action, outcome=outcome,
+                    )
+        else:
+            for step, action in enumerate(actions, 1):
+                step_context = {
+                    **trace_context, "step_index": step, "step_count": len(actions),
+                    "dispatch_mode": dispatch_mode,
+                }
+                try:
+                    self._check_cancel()
+                    if step > 1:
+                        self._check_sequence_target(snapshot)
+                    if action["type"] == "focus_window":
+                        outcome = self._focus_window(snapshot, action)
+                    elif action["type"] in {"click_element", "click", "double_click"}:
+                        outcome = self._click(snapshot, action, trace_context=step_context)
+                    else:
+                        outcome = self._dotool(snapshot, action, trace_context=step_context)
+                except InterruptedError:
+                    raise
+                except ActionNotDispatched as exc:
+                    outcome = {"effect": "refused", "route": exc.route, "reason": exc.reason,
+                               "message": str(exc)}
+                except (RuntimeError, ValueError) as exc:
+                    outcome = {"effect": "unknown", "error": str(exc),
+                               "message": "Input may or may not have occurred. Inspect fresh state before retrying."}
+                outcomes.append(outcome)
+                if self.trace:
+                    self.trace.write("computer_action_result", **step_context, action=action, outcome=outcome)
+                if outcome["effect"] in {"refused", "unknown"}:
+                    break
         sequence_complete = len(outcomes) == len(actions) and all(
             outcome["effect"] not in {"refused", "unknown"} for outcome in outcomes
         )
@@ -1483,6 +1558,7 @@ class ComputerSession:
         result = ({"action_outcome": outcomes[0]} if len(actions) == 1 else {
             "action_outcomes": outcomes, "sequence_complete": sequence_complete,
             "expected_result": expected_result,
+            "dispatch_mode": dispatch_mode,
         })
         result["verify_state"] = verification
         if len(actions) > 1 and not sequence_complete:

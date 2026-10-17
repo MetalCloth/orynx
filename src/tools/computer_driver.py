@@ -199,7 +199,7 @@ class HyprlandDriver:
         screen_y = (global_y - desktop_top) / (desktop_bottom - desktop_top)
         return f"mouseto {screen_x:.6f} {screen_y:.6f}"
 
-    def execute(self, name: str, args: dict, *, trace_context: dict | None = None) -> None:
+    def _commands(self, name: str, args: dict) -> list[str]:
         actions = []
         if name in {"click", "left_double", "right_single", "scroll"}:
             actions.append(self._move(args["point"]))
@@ -222,10 +222,18 @@ class HyprlandDriver:
                     actions.append("key enter")
         else:
             raise ValueError(f"Unsupported desktop action: {name}")
+        return actions
+
+    def execute_sequence(self, steps: list[tuple[str, dict]], *, trace_context: dict | None = None) -> None:
+        """Send a known same-window input sequence through one dotool process."""
+        actions = [command for name, args in steps for command in self._commands(name, args)]
         if trace_context is None:
             self._input(actions)
         else:
             self._input(actions, trace_context=trace_context)
+
+    def execute(self, name: str, args: dict, *, trace_context: dict | None = None) -> None:
+        self.execute_sequence([(name, args)], trace_context=trace_context)
 
 
 def _output_text(value: bytes | str | None) -> str:
