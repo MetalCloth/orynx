@@ -36,7 +36,7 @@ def computer_task_schema() -> dict[str, Any]:
             "updates": {"type": "array", "maxItems": 14, "items": {
                 "type": "object", "additionalProperties": False, "properties": {
                     "kind": {"type": "string", "enum": ["step", "check"]},
-                    "index": {"type": "integer", "description": "1-based step or done-check index."},
+                    "index": {"type": "integer", "description": "1-based step or done-check index matching remaining_steps or remaining_checks; the first item is 1, never 0."},
                     "status": {"type": "string", "enum": ["pending", "working", "verified", "blocked"]},
                     "evidence": {"type": "string", "description": "Required for verified or blocked updates."},
                 }, "required": ["kind", "index", "status"],
@@ -196,7 +196,11 @@ class ComputerTaskLedger:
                             raise ValueError("Update kind must be step or check with a 1-based index.")
                         target = state["steps"] if kind == "step" else state["done_checks"]
                         if not 1 <= index <= len(target) or (kind, index) in seen:
-                            raise ValueError("Update index must be current and unique within the batch.")
+                            range_name = "remaining_steps" if kind == "step" else "remaining_checks"
+                            raise ValueError(
+                                f"{kind} update index {index} is invalid or duplicated. Use a unique 1-based "
+                                f"index from 1 to {len(target)}, matching {range_name}."
+                            )
                         seen.add((kind, index))
                         allowed = ("working", "verified", "blocked") if kind == "step" else ("pending", "verified")
                         if status not in allowed:

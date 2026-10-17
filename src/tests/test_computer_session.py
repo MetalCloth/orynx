@@ -53,7 +53,7 @@ class ComputerActionBatchTests(unittest.TestCase):
         ):
             result = session.act({
                 "observation_id": "current",
-                "actions": [
+                "action": [
                     {"type": "key", "key": "ctrl+l"},
                     {"type": "type", "text": "https://example.com"},
                     {"type": "key", "key": "enter"},
@@ -73,7 +73,7 @@ class ComputerActionBatchTests(unittest.TestCase):
         ):
             result = session.act({
                 "observation_id": "current",
-                "actions": [
+                "action": [
                     {"type": "key", "key": "ctrl+w"},
                     {"type": "type", "text": "text"},
                     {"type": "key", "key": "enter"},

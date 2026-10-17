@@ -40,6 +40,8 @@ The full desktop overview uses the monitor's native pixel dimensions. Zooming is
 small or uncertain visual targets; the crop also keeps its native pixel dimensions.
 Each result says `image_scope` so the model can distinguish a full desktop image from a crop.
 
+Before launching a named app, check `mode="windows"`; if it is already open and the user did not ask for a new instance, focus that window. Splash or help screens may contain real links, so do not dismiss one by clicking an arbitrary point. Use a visible dismiss control, or Escape when appropriate, then inspect the fresh state.
+
 ### What `verify_state` checks
 
 Oryn calls CUA `verify_state` through `computer_wait` or `computer_act.wait_for`, using an exact
@@ -88,7 +90,7 @@ The IDs below are invented. Suppose Brave is on workspace 3 and Blender is on wo
    `Brave: workspace=3, window_index=1, pid=4321` and
    `Blender: workspace=5, window_index=2`. It has no screenshot. A uniquely matched
    Brave window may also have `window_id=71`.
-2. `computer_act({"observation_id":"list-a","action":{"type":"focus_window","window_index":1},"expected_result":"The selected app becomes the focused window"})`
+2. `computer_act({"observation_id":"list-a","action":[{"type":"focus_window","window_index":1}],"expected_result":"The selected app becomes the focused window"})`
    checks that the listed Brave window is still the same, focuses it, and returns a fresh
    screenshot and accessibility controls when CUA can match it. This is one action;
    no key or click is chained to the focus.
@@ -101,7 +103,10 @@ The IDs below are invented. Suppose Brave is on workspace 3 and Blender is on wo
    one `record` call can update multiple steps and checks, each with its own evidence.
 
 Every `computer_act` call needs an `expected_result` that describes the visible or native state
-expected after the input. Its result already includes a fresh observation. Up to two more
+expected after the input. Put every input in `action`, an array containing 1–5 input objects.
+One item sends one input; 2–5 items send a sequence when every step is already grounded. Put literal
+text and numbers in a `type` action's `text` field, not its `key` field. Its result already includes a
+fresh observation. Up to two more
 `computer_observe` or `computer_wait` calls are allowed after that input; a third is refused
 until a new input, so the model must use the latest observation to continue or report a blocker.
 
@@ -111,7 +116,8 @@ stopped the requested input before dispatch; `unknown` means its occurrence is u
 
 For longer tasks, `computer_task({"operation":"record","updates":[...]})` can mark up to
 eight steps and six done checks in one call. Each item names `kind` (`step` or `check`), a
-1-based `index`, a valid `status`, and evidence for `verified` or `blocked`. The older
+1-based `index` (the first item is 1, never 0, matching `remaining_steps` or
+`remaining_checks`), a valid `status`, and evidence for `verified` or `blocked`. The older
 single-step and single-check fields still work for existing callers but are no longer
 advertised to the model. If the next action is already clear from
 the last observation, the model can issue `record` before `computer_act` in the same
