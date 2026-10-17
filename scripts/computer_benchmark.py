@@ -61,6 +61,7 @@ def _new_run(path: Path, trace_id: str) -> dict:
         "tool_calls": Counter(),
         "tool_time_ms": {},
         "tool_failures": 0,
+        "action_refusals": 0,
         "observations": 0,
         "screenshots_attached": 0,
         "observation_scopes": Counter(),
@@ -143,6 +144,11 @@ def _add_current_record(run: dict, record: dict) -> None:
         if controls is not None:
             run["accessibility_controls_sent"] += int(controls)
 
+    if event == "computer_action_result":
+        outcome = record.get("outcome")
+        if isinstance(outcome, dict) and outcome.get("effect") == "refused":
+            run["action_refusals"] += 1
+
     if event == "computer_progress_hint":
         run["progress_hints"] += 1
 
@@ -164,6 +170,7 @@ def _finish_run(run: dict, path: Path, trace_id: str) -> dict:
             name: _stats(values) for name, values in sorted(run["tool_time_ms"].items())
         },
         "tool_failures": run["tool_failures"],
+        "action_refusals": run["action_refusals"],
         "observations": run["observations"],
         "observation_scopes": dict(sorted(run["observation_scopes"].items())),
         "screenshots_attached": run["screenshots_attached"],
@@ -199,6 +206,8 @@ def _totals(runs: list[dict], model_response_ms: list[float]) -> dict:
         ]),
         "model_response_ms": _stats(model_response_ms),
         "tool_calls": dict(sorted(tool_calls.items())),
+        "tool_failures": sum(run["tool_failures"] for run in runs),
+        "action_refusals": sum(run["action_refusals"] for run in runs),
         "screenshots_attached": sum(run["screenshots_attached"] for run in runs),
         "accessibility_tree_outputs": sum(run["accessibility"]["tree_outputs"] for run in runs),
         "accessibility_controls_sent": sum(run["accessibility"]["controls_sent"] for run in runs),
