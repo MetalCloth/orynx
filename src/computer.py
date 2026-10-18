@@ -9,7 +9,7 @@ from typing import Callable
 from src.computer_logging import ComputerTrace
 from src.providers.computer import ComputerPlanner, InvalidComputerPlan
 from src.tools.computer_accessibility import observe_active_window
-from src.tools.computer_driver import HyprlandDriver, computer_driver_name
+from src.tools.computer_driver import HyprlandDriver, computer_driver_name, normalize_dotool_key
 
 
 MAX_TURNS = 30
@@ -70,7 +70,7 @@ def _action(action: object, size: tuple[int, int], element_ids: set[int]) -> dic
         key = action["key"]
         if not isinstance(key, str) or not KEY.fullmatch(key):
             raise ValueError("The selected model returned an invalid key combination.")
-        action["key"] = "+".join(key.replace("+", " ").split())
+        action["key"] = normalize_dotool_key(key)
         if len(action["key"].split("+")) > 3:
             raise ValueError("The selected model returned too many keys in one combination.")
     elif name == "type":

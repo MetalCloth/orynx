@@ -17,6 +17,9 @@ silent recordings are detected locally and are not sent to ElevenLabs.
 The JSONL file is the detailed record. `./scripts/computer-log.sh follow` renders it as a
 timestamped, sequence-numbered terminal view, with color when connected to a terminal.
 `NO_COLOR=1` disables color. `./scripts/computer-log.sh follow --raw` shows the raw records.
+The readable view shows dates and times in IST (UTC+05:30), including older traces. Raw
+records keep `time_utc`, and log filenames use UTC, so elapsed-time calculations and
+file ordering stay consistent.
 
 Each record has a `trace_id` shared by the task and a monotonically increasing `seq`. The
 other IDs connect the parts that are easy to lose when reading a flat log:
@@ -83,9 +86,9 @@ needed.
 Pixel clicks log a computer_target_preflight event with the target-area comparison,
 observation age, and whether a changed area settled before Oryn returned a new image.
 Single desktop key actions can log computer_ui_settle when their changed region needs
-another look. Repeated checks or action patterns log computer_progress_hint; a passive
-check refused at the post-action limit logs computer_observation_refused. These events
-describe harness behavior; they do not prove that the user's task succeeded.
+another look. Repeated action patterns can log computer_progress_hint. Follow-up
+observations are not blocked by a fixed count. These events describe harness behavior;
+they do not prove that the user's task succeeded.
 The temporary comparison frames are not model attachments or saved images; a later
 fresh observation is saved when image logging is enabled.
 

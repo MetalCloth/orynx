@@ -6,10 +6,12 @@ import os
 import re
 import shlex
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+IST = timezone(timedelta(hours=5, minutes=30), name="IST")
 
 
 def _short(value: object, limit: int = 240) -> str:
@@ -23,8 +25,17 @@ def _short(value: object, limit: int = 240) -> str:
 
 
 def _time(record: dict) -> str:
-    value = record.get("time_utc", "")
-    return f"{value[11:23]}Z" if isinstance(value, str) and len(value) >= 23 else "--:--:--Z"
+    value = record.get("time_utc")
+    if not isinstance(value, str):
+        return "--:--:-- IST"
+    try:
+        stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        local = stamp.astimezone(IST)
+    except (ValueError, OverflowError):
+        return "--:--:-- IST"
+    return local.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + " IST"
 
 
 def _elapsed(record: dict) -> str:

@@ -214,7 +214,10 @@ class ComputerTaskLedger:
                         seen.add((kind, name_key))
                         allowed = ("working", "verified", "blocked") if kind == "step" else ("pending", "verified")
                         if status not in allowed:
-                            raise ValueError("Update status is invalid for its step or done check.")
+                            raise ValueError(
+                                f"{kind} {name!r} cannot use status {status!r}; "
+                                f"use one of: {', '.join(allowed)}."
+                            )
                         item_evidence = update.get("evidence", "")
                         if status in ("verified", "blocked"):
                             item_evidence = _text(item_evidence, "evidence", 500)

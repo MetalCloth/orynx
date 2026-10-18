@@ -26,7 +26,7 @@ and native checks are unavailable.
 | `computer_observe({"mode":"active"})` | Match the focused Hyprland window with `list_windows`, then `get_window_state` | That window's screenshot and bounded accessibility controls/tree when a unique match exists. Otherwise a desktop screenshot. |
 | `computer_observe({"mode":"window","pid":4321,"window_id":71})` | `get_window_state` | The specified window's bounded controls/tree and a screenshot when available. On Wayland, Oryn may fall back to a desktop screenshot while keeping the exact window's tree. |
 | `computer_observe({"mode":"desktop"})` | `get_desktop_state` | Full-screen screenshot, plus read-only labels from the active window when CUA can safely match it. These labels have no actionable indices; use `mode="active"` for `click_element`. |
-| `computer_observe({"mode":"desktop","observation_id":"obs-a","region":{"x":400,"y":150,"width":300,"height":250}})` | One native-resolution desktop capture, cropped to a region of the latest full desktop image | One zoomed image with a new ID. The region uses `obs-a` pixels; a click from the crop uses crop-local pixels and maps back to the monitor. A crop click returns a fresh full desktop image. |
+| `computer_observe({"mode":"desktop","observation_id":"obs-a","region":{"x":400,"y":150,"width":300,"height":250}})` | One native-resolution desktop capture, cropped to a region of the latest full desktop image | One zoomed image with a new ID. The region uses `obs-a` pixels; a click from the crop uses crop-local pixels and maps back to the monitor. If focus changes before the crop, Oryn returns a fresh full desktop with `zoom_aborted`; use its new image scope and ID. A crop click returns a fresh full desktop image. |
 
 `start_session` and `end_session` prepare and close CUA; they are not screen reads.
 The accessibility tree is what an app exposes to the desktop, not a direct browser DOM feed.
@@ -106,13 +106,14 @@ Every `computer_act` call needs an `expected_result` that describes the visible 
 expected after the input. Put every input in `action`, an array containing 1–5 input objects.
 One item sends one input; 2–5 items send a sequence when every step is already grounded. Put literal
 text and numbers in a `type` action's `text` field, not its `key` field. Its result already includes a
-fresh observation. Up to two more
-`computer_observe` or `computer_wait` calls are allowed after that input; a third is refused
-until a new input, so the model must use the latest observation to continue or report a blocker.
+fresh observation. Additional `computer_observe` or `computer_wait` calls can follow when the UI
+is loading or unclear.
+A repeated action pattern may produce a progress hint; it does not block a fresh read.
 
 The input result `sent` means the dotool command completed. The model checks the resulting
-observation before claiming that the app changed. For `computer_act`, `refused` means Oryn
-stopped the requested input before dispatch; `unknown` means its occurrence is uncertain.
+observation or an exact `verify_state` result before claiming that the app changed. For
+`computer_act`, `refused` means Oryn stopped the requested input before dispatch;
+`unknown` means its occurrence is uncertain.
 
 For longer tasks, `computer_task({"operation":"record","updates":[...]})` can mark up to
 eight steps and six done checks in one call. Each item names `kind` (`step` or `check`), a

@@ -21,6 +21,51 @@ def computer_driver_name() -> str:
     return name
 
 
+_KEY_ALIASES = {
+    "escape": "esc", "escape_key": "esc", "return": "enter", "return_key": "enter", "enter_key": "enter",
+    "spacebar": "space", "space_bar": "space", "bksp": "backspace", "back_space": "backspace",
+    "del": "delete", "ins": "insert", "page_up": "pageup", "pgup": "pageup", "prior": "pageup",
+    "page_down": "pagedown", "pgdn": "pagedown", "pgdown": "pagedown", "next": "pagedown",
+    "arrowup": "up", "arrow_up": "up", "up_arrow": "up",
+    "arrowdown": "down", "arrow_down": "down", "down_arrow": "down",
+    "arrowleft": "left", "arrow_left": "left", "left_arrow": "left",
+    "arrowright": "right", "arrow_right": "right", "right_arrow": "right",
+    "caps_lock": "capslock", "num_lock": "numlock", "scroll_lock": "scrolllock",
+    "ctrl_l": "leftctrl", "control_l": "leftctrl", "left_ctrl": "leftctrl", "left_control": "leftctrl",
+    "ctrl_r": "rightctrl", "control_r": "rightctrl", "right_ctrl": "rightctrl", "right_control": "rightctrl",
+    "shift_l": "leftshift", "left_shift": "leftshift", "shift_r": "rightshift", "right_shift": "rightshift",
+    "alt_l": "leftalt", "left_alt": "leftalt", "alt_r": "rightalt", "right_alt": "rightalt",
+    "meta_l": "leftmeta", "super_l": "leftmeta", "win_l": "leftmeta", "windows_l": "leftmeta",
+    "meta_r": "rightmeta", "super_r": "rightmeta", "win_r": "rightmeta", "windows_r": "rightmeta",
+}
+_CHORD_MODIFIERS = {
+    "control": "ctrl", "ctl": "ctrl", "command": "super", "cmd": "super",
+    "meta": "super", "win": "super", "windows": "super", "option": "alt",
+    "leftctrl": "ctrl", "rightctrl": "ctrl", "leftshift": "shift", "rightshift": "shift",
+    "leftalt": "alt", "rightalt": "altgr", "leftmeta": "super", "rightmeta": "super",
+}
+_STANDALONE_MODIFIERS = {
+    "ctrl": "leftctrl", "control": "leftctrl", "ctl": "leftctrl", "shift": "leftshift",
+    "alt": "leftalt", "option": "leftalt", "altgr": "rightalt", "super": "leftmeta",
+    "command": "leftmeta", "cmd": "leftmeta", "meta": "leftmeta", "win": "leftmeta", "windows": "leftmeta",
+}
+
+
+def normalize_dotool_key(key: str) -> str:
+    """Convert common agent and OS key spellings to dotool's Linux names."""
+    parts = key.replace("+", " ").split()
+
+    def alias(part: str) -> str:
+        prefix, separator, name = part.partition(":")
+        lookup = name if separator and prefix.casefold() == "x" else part
+        return _KEY_ALIASES.get(lookup.casefold().replace("-", "_"), part)
+
+    if len(parts) == 1:
+        token = alias(parts[0])
+        return _STANDALONE_MODIFIERS.get(token.casefold(), token)
+    return "+".join(_CHORD_MODIFIERS.get(token.casefold(), token) for token in map(alias, parts))
+
+
 class HyprlandDriver:
     def __init__(self, trace: ComputerTrace | None = None) -> None:
         self.trace = trace
@@ -212,7 +257,7 @@ class HyprlandDriver:
             scroll = {"up": "wheel 3", "down": "wheel -3", "left": "hwheel 3", "right": "hwheel -3"}
             actions.append(scroll[args["direction"]])
         elif name == "hotkey":
-            actions.append(f"key {args['key']}")
+            actions.append(f"key {normalize_dotool_key(args['key'])}")
         elif name == "type":
             lines = args["content"].split("\n")
             for index, line in enumerate(lines):
