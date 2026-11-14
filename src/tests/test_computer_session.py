@@ -9,7 +9,7 @@ from unittest.mock import patch
 from PIL import Image
 
 from src.tools.computer_driver import HyprlandDriver
-from src.tools.computer_session import ComputerResult, ComputerSession
+from src.tools.computer_session import ActionNotDispatched, ComputerResult, ComputerSession
 
 
 class ComputerActionBatchTests(unittest.TestCase):
@@ -170,7 +170,7 @@ class ComputerAccessibilityObservationTests(unittest.TestCase):
         )
         return session
 
-    def test_window_shows_state_and_actionless_controls_but_clicks_only_mappable_enabled_rows(self):
+    def test_window_lists_controls_without_click_gate_and_refuses_unmappable_clicks(self):
         state = self._state()
         stamp = ("window", 0, (0, 0), (800, 450))
         with TemporaryDirectory() as path:
@@ -189,14 +189,12 @@ class ComputerAccessibilityObservationTests(unittest.TestCase):
             controls = {item["index"]: item for item in payload["controls"]}
             self.assertEqual(len(controls), 7)
             self.assertEqual(controls[2]["actions"], [])
-            self.assertTrue(controls[2]["can_click"])
+            self.assertTrue(all("can_click" not in item for item in controls.values()))
             self.assertEqual(controls[2]["parent_label"], "Settings pane")
             self.assertEqual(controls[2]["depth"], 1)
             self.assertEqual(controls[2]["image_frame"], {"x": 20, "y": 20, "w": 200, "h": 30})
-            self.assertFalse(controls[3]["can_click"])
             self.assertTrue(controls[3]["selected"])
             self.assertFalse(controls[3]["enabled"])
-            self.assertFalse(controls[4]["can_click"])
             self.assertNotIn("image_frame", controls[4])
             self.assertEqual(controls[5]["label"], "[sensitive input]")
             self.assertEqual(controls[5]["value"], "[redacted]")
@@ -210,7 +208,7 @@ class ComputerAccessibilityObservationTests(unittest.TestCase):
             self.assertNotIn("hunter2", result.text)
             self.assertNotIn("sk-raw-secret", result.text)
             self.assertNotIn("element_token", result.text)
-            self.assertEqual(set(session.current["elements"]), {2, 5, 6, 7})
+            self.assertEqual(set(session.current["elements"]), set(range(1, 8)))
             ComputerSession._action(session.current, {"type": "click_element", "element_index": 2})
             with patch.object(session, "_dotool", return_value={"effect": "sent"}) as dotool:
                 session._click(session.current, {"type": "click_element", "element_index": 2})
@@ -220,10 +218,16 @@ class ComputerAccessibilityObservationTests(unittest.TestCase):
                 session._click(session.current, {"type": "click_element", "element_index": 5})
             self.assertEqual(dotool.call_args.kwargs["target"]["value"], "[redacted]")
             self.assertEqual(dotool.call_args.kwargs["target"]["frame_space"], "window")
-            with self.assertRaisesRegex(ValueError, "cannot be clicked"):
-                ComputerSession._action(session.current, {"type": "click_element", "element_index": 3})
-            with self.assertRaisesRegex(ValueError, "cannot be clicked"):
-                ComputerSession._action(session.current, {"type": "click_element", "element_index": 4})
+            ComputerSession._action(session.current, {"type": "click_element", "element_index": 3})
+            with patch.object(session, "_dotool", return_value={"effect": "sent"}) as dotool:
+                session._click(session.current, {"type": "click_element", "element_index": 3})
+            dotool.assert_called_once()
+            ComputerSession._action(session.current, {"type": "click_element", "element_index": 4})
+            with patch.object(session, "_dotool") as dotool:
+                with self.assertRaises(ActionNotDispatched) as refused:
+                    session._click(session.current, {"type": "click_element", "element_index": 4})
+            self.assertEqual(refused.exception.reason, "element_frame_unavailable")
+            dotool.assert_not_called()
             with self.assertRaisesRegex(ValueError, "absent"):
                 ComputerSession._action(session.current, {"type": "click_element", "element_index": 99})
             old_id = session.current["id"]
