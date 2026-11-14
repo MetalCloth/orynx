@@ -10,6 +10,10 @@ fi
 
 # Preserve the caller's working directory as the default project.
 export PYTHONPATH="$app_dir${PYTHONPATH:+:$PYTHONPATH}"
+# Keep tiktoken's encoding cache across reboots instead of under /tmp.
+if [[ ! -v TIKTOKEN_CACHE_DIR && ! -v DATA_GYM_CACHE_DIR ]]; then
+    export TIKTOKEN_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/oryn/tiktoken"
+fi
 if [[ "${1:-}" == "mcp" ]]; then
     shift
     exec "$app_python" -m src.mcp.oauth "$@"
