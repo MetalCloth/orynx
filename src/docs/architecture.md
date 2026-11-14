@@ -18,6 +18,9 @@ The word **harness** means this surrounding machinery. A strong harness makes th
 | Provider result types | [types.py](../providers/types.py) | Defines a `ToolCall` and a `ModelResponse`, including provider metadata needed to continue tool calls |
 | Turn execution | [conversation_loop.py](../agent/conversation_loop.py) | Repeats model requests and sequential tool execution, enforces round and result limits |
 | Computer task record | [computer_task.py](../agent/computer_task.py) | Validates model-maintained goals, constraints, steps, facts, and evidence; the turn loop enforces its declared UI environment |
+| Local computer tool execution | [computer_session.py](../tools/computer_session.py) | Owns scoped observations, single-use IDs, 1–5-input action calls, target validation, native waits, and fresh results; see the [computer-use guide](21-cua-main-loop.md) |
+| Desktop adapters | [cua_driver.py](../tools/cua_driver.py), [computer_driver.py](../tools/computer_driver.py) | CUA supplies accessibility, screenshots, and native checks; Hyprland supplies window metadata/focus; Dotool sends input |
+| Computer trace logging | [computer_logging.py](../computer_logging.py) | Links model/tool timing, observations, and inputs; optionally saves images per traced turn |
 | Context preparation | [context.py](../agent/context.py), [compression.py](../agent/compression.py) | Estimates request tokens, compacts older completed turns, and selects recent whole turns |
 | Product instructions | [system_prompt.py](../agent/system_prompt.py) | Supplies Oryn identity, formatting guidance, tool discipline, and recovery instructions |
 | Project instructions | [project_context.py](../agent/project_context.py) | Reads a root `AGENTS.md` safely and with a size limit |

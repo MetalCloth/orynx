@@ -4,6 +4,8 @@
 
 This chapter distinguishes running code, partial support, and proposals. It records the repository issue list inspected on 27 September 2026; all ten listed issues were open at that time. An open issue can contain partially completed work.
 
+For the later computer-agent work, see the [current computer-use implementation](21-cua-main-loop.md), [bottleneck tracker](../../docs/computer-agent-bottlenecks.md), and [proposed execution redesign](24-computer-execution-redesign.md). The redesign is a proposal, not an implemented capability in the inventory below.
+
 ## 1. Capability inventory
 
 | Capability | Status | Evidence / remaining boundary |

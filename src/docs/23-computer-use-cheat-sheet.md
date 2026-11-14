@@ -103,7 +103,9 @@ The IDs below are invented. Suppose Brave is on workspace 3 and Blender is on wo
    one `record` call can update multiple steps and checks, each with its own evidence.
 
 Every `computer_act` call needs an `expected_result` that describes the visible or native state
-expected after the input. Put every input in `action`, an array containing 1–5 input objects.
+expected after the input. This is prose for the model to compare with the result; the harness
+does not automatically test it. Use `wait_for` for a supported exact native condition.
+Put every input in `action`, an array containing 1–5 input objects.
 One item sends one input; 2–5 items send a sequence when every step is already grounded. Put literal
 text and numbers in a `type` action's `text` field, not its `key` field. Its result already includes a
 fresh observation. Additional `computer_observe` or `computer_wait` calls can follow when the UI
@@ -117,14 +119,27 @@ observation or an exact `verify_state` result before claiming that the app chang
 
 For longer tasks, `computer_task({"operation":"record","updates":[...]})` can mark up to
 eight steps and six done checks in one call. Each item names `kind` (`step` or `check`), a
-1-based `index` (the first item is 1, never 0, matching `remaining_steps` or
-`remaining_checks`), a valid `status`, and evidence for `verified` or `blocked`. The older
-single-step and single-check fields still work for existing callers but are no longer
-advertised to the model. If the next action is already clear from
+`name` from the saved task, a valid `status`, and evidence for `verified` or `blocked`.
+Step statuses are `working`, `verified`, or `blocked`; check statuses are `pending` or
+`verified`. For a saved step named “Open Settings”, an update can be:
+
+```json
+{
+  "operation": "record",
+  "updates": [
+    {"kind": "step", "name": "Open Settings", "status": "verified", "evidence": "The fresh observation shows the Settings window"}
+  ]
+}
+```
+
+The result lists remaining step/check names, so the model can copy the matching name.
+Batch updates do not accept an `index`. The older flat `step_index` and `check_index`
+fields still work for existing callers but are no longer advertised to the model.
+If the next action is already clear from
 the last observation, the model can issue `record` before `computer_act` in the same
 response. After the final result, it can issue `record` then `finish` together. It must
-never record evidence from an action it has not yet seen. The result lists remaining
-step/check indices; `finish` can reuse evidence from a verified done check once both
+never record evidence from an action it has not yet seen. `finish` can reuse evidence
+from a verified done check once both remaining
 lists are empty.
 
 ## What stays in history

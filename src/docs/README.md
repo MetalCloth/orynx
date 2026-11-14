@@ -2,7 +2,7 @@
 
 **A detailed explanation of what we built, how it works, why it changed, and what remains unfinished.**
 
-Core documentation snapshot: **14 October 2026**. The computer-use chapters describe the current scoped `/computer` flow, and the setup, TUI, and tracing chapters cover push-to-talk voice input and microphone feedback. Earlier chapters can describe historical behavior; each chapter links to the code responsible for its behavior.
+Core documentation snapshot: **14 October 2026**. The current computer-use guide and cheat sheet were checked against code at `89fd3cb` on **4 November 2026**. They describe computer tools in ordinary TUI chat; `/computer` remains a compatibility shortcut. The setup, TUI, and tracing chapters also cover push-to-talk voice input and microphone feedback. This computer-use review does not revalidate every older core chapter. Each chapter links to the code responsible for its behavior.
 
 Follow-up chapters now include on-demand MCP schemas, explicit MCP opt-in, durable per-chat undo, scoped skills, one bounded read-only subagent, Git awareness, safe upstream traces, offline failure/context evaluations, a local first-release boundary, and a documented shared turn/API contract. The [core upgrade plan](16-core-upgrade-plan.md) records the earlier reliability milestone and its remaining limits.
 
@@ -30,12 +30,13 @@ Oryn is an educational local coding assistant. Its model runs remotely, while it
 | [16. Native tool schema reference](15-native-tool-reference.md) | The precise arguments advertised to the model by the 22 built-in tools |
 | [Core upgrade plan and progress](16-core-upgrade-plan.md) | Six selected improvements, their implementation, acceptance checks, and remaining limits |
 | [17. Shared turn gateway and local API](17-shared-turn-gateway-and-api.md) | Common turn entry point, dashboard HTTP/NDJSON contract, persistence semantics, and future background lifecycle |
-| [`/computer` perception reform](18-computer-perception-plan.md) | Measured baseline, opt-in AT-SPI observer, live test results, and staged browser design |
+| [Historical `/computer` perception reform](18-computer-perception-plan.md) | Earlier measured baseline, opt-in AT-SPI observer, live test results, and staged browser design |
 | [CUA Driver research notes](19-cua-driver-research.md) | Open Interpreter's CUA driver lineage, observation/action loop, AT-SPI and pixels, permissions, browser routing, and Linux/Hyprland limits |
 | [CUA Hyprland trial](20-cua-driver-hyprland-experiment.md) | Isolated A/B result, integration decision, and remaining platform limits |
 | [Computer use in the main loop](21-cua-main-loop.md) | Current flow, decision reasons and tradeoffs, scoped CUA tools, image results, exact targets, and conditional waiting |
 | [Computer trace logging](22-computer-tracing.md) | Local event detail, readable live output, IDs that connect observations to actions, optional LangSmith export, and privacy limits |
 | [Computer-use cheat sheet](23-computer-use-cheat-sheet.md) | The tools, observation modes, CUA reads, IDs, action outcomes, and saved history in one place |
+| [Proposed computer execution redesign](24-computer-execution-redesign.md) | Current capabilities versus the proposed conditional executor, perception sources, and how to evaluate the first experiment |
 | [Manual smoke checklist](smoke-checklist.md) | A practical end-to-end checklist for the terminal and dashboard |
 
 ## Choose a reading path

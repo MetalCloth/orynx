@@ -2,6 +2,11 @@
 
 Tracking issues for the general computer-agent bottlenecks identified from recent runs:
 
+These links record the original problem areas, not a fresh audit of GitHub issue status.
+See the [current implementation](../src/docs/21-cua-main-loop.md) for completed changes
+and the [proposed execution redesign](../src/docs/24-computer-execution-redesign.md)
+for the next experiment; the redesign has not been implemented.
+
 - [Planning and progress tracking](https://github.com/MetalCloth/orynx/issues/11) — retain the goal, chosen target, and observed progress through a run.
 - [Model round trips and safe batching](https://github.com/MetalCloth/orynx/issues/12) — reduce avoidable model waits while preserving observation points where they matter.
 - [UI grounding and accessibility data](https://github.com/MetalCloth/orynx/issues/13) — combine current screenshots with relevant accessibility information and clear scope.
