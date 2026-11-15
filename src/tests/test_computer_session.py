@@ -154,7 +154,8 @@ class ComputerAccessibilityObservationTests(unittest.TestCase):
                  "label": "Notifications", "selected": False, "enabled": True,
                  "frame": {"x": 20, "y": 180, "w": 200, "h": 30}},
                 {"element_index": 8, "element_token": "logical", "role": "button",
-                 "label": "Next tab", "enabled": True, "actions": ["click"]},
+                 "label": "Next tab", "enabled": True,
+                 "actions": ["click"] + [f"action-{number}" for number in range(16)]},
             ],
         }
 
@@ -197,7 +198,8 @@ class ComputerAccessibilityObservationTests(unittest.TestCase):
             self.assertTrue(controls[3]["mouse_position_available"])
             self.assertFalse(controls[4]["mouse_position_available"])
             self.assertFalse(controls[8]["mouse_position_available"])
-            self.assertEqual(controls[8]["actions"], ["click"])
+            self.assertEqual(len(controls[8]["actions"]), 15)
+            self.assertEqual(controls[8]["actions"][-1], "action-13")
             self.assertEqual(controls[2]["parent_label"], "Settings pane")
             self.assertEqual(controls[2]["depth"], 1)
             self.assertEqual(controls[2]["image_frame"], {"x": 20, "y": 20, "w": 200, "h": 30})
@@ -212,8 +214,8 @@ class ComputerAccessibilityObservationTests(unittest.TestCase):
             self.assertEqual(payload["truncation_reason"], "max_elements")
             self.assertEqual(payload["returned_element_count"], 8)
             self.assertEqual(payload["controls_omitted_count"], 0)
-            self.assertIn("omitted", payload["tree_excerpt"])
-            self.assertNotIn("hunter2", result.text)
+            self.assertIn('password text "hunter2"', payload["tree_excerpt"])
+            self.assertNotIn("hunter2", result.history_text)
             self.assertNotIn("sk-raw-secret", result.text)
             self.assertNotIn("element_token", result.text)
             self.assertEqual(set(session.current["elements"]), set(range(1, 9)))

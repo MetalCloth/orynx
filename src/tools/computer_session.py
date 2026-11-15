@@ -556,11 +556,6 @@ class ComputerSession:
             # shortcut: the document boundary is a heuristic; use pixels if page controls remain omitted.
             ordered_elements = ordered_elements[document_at:] + ordered_elements[:document_at]
         tree = str(state.get("tree_markdown") or "")
-        # A raw tree can repeat field values outside structured control rows.
-        if _SENSITIVE_ACCESSIBILITY.search(tree) or any(
-            self._accessibility_text(row)[2] for row in rows if isinstance(row, dict)
-        ):
-            tree = "[omitted: accessibility tree may contain sensitive values]"
         if document_at is not None:
             document_text = tree.casefold().find("document")
             if document_text >= 0:
@@ -593,7 +588,7 @@ class ComputerSession:
             control = {
                 "index": index, "role": row.get("role"),
                 "label": label, "value": value,
-                "actions": actions[:5] if isinstance(actions, list) else [],
+                "actions": actions[:15] if isinstance(actions, list) else [],
             }
             for key in ("enabled", "selected"):
                 if type(row.get(key)) is bool:

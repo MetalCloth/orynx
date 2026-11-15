@@ -34,7 +34,11 @@ Some apps expose only a generic window. Window and active observations send at m
 controls and a 1,200-character tree excerpt to the model. Each control's
 `mouse_position_available` says whether Oryn can map its current frame to a Dotool point.
 It does not prove the control is visible, enabled, or responsive; an accessibility action
-can still have no mouse position. When a document is exposed, its
+can still have no mouse position. `actions` lists up to fifteen TryCUA action names;
+`parent_label` is the parent entry's label (up to 80 characters) when available.
+The tree excerpt is no longer hidden for sensitive keywords, so it can include
+private text; structured control values still use Oryn's keyword-based redaction.
+When a document is exposed, its
 controls come before browser chrome in that bounded list.
 `mode="windows"` has no image but supplies an `observation_id` for `focus_window`;
 `mode="desktop"` always has an image. `image=false` can skip an
