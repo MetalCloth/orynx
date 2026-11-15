@@ -30,8 +30,11 @@ and native checks are unavailable.
 
 `start_session` and `end_session` prepare and close CUA; they are not screen reads.
 The accessibility tree is what an app exposes to the desktop, not a direct browser DOM feed.
-Some apps expose only a generic window. Window and active observations send at most 60 actionable
-controls and a 1,200-character tree excerpt to the model. When a document is exposed, its
+Some apps expose only a generic window. Window and active observations send at most 60 numbered
+controls and a 1,200-character tree excerpt to the model. Each control's
+`mouse_position_available` says whether Oryn can map its current frame to a Dotool point.
+It does not prove the control is visible, enabled, or responsive; an accessibility action
+can still have no mouse position. When a document is exposed, its
 controls come before browser chrome in that bounded list.
 `mode="windows"` has no image but supplies an `observation_id` for `focus_window`;
 `mode="desktop"` always has an image. `image=false` can skip an

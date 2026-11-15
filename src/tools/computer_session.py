@@ -39,7 +39,11 @@ Before every computer_act, state a short expected_result describing the visible 
 COMPUTER_INSTRUCTIONS += (
     "\nPixel clicks compare the target area just before input. If target_changed is returned, no click was sent; "
     "use the fresh image to choose a new point. A single desktop key action may briefly settle a changed area; "
-    "ui_stability=changing means inspect or wait before a pixel click. Action outcomes report input delivery; "
+    "ui_stability=changing means inspect or wait before a pixel click. "
+    "A window control's mouse_position_available only says its current frame maps to a Dotool point. "
+    "False means click_element has no mapped point; use a matching screenshot only if the target is visible. "
+    "True does not prove the control is visible, enabled, or responsive. "
+    "Action outcomes report input delivery; "
     "verify_state reports an exact native predicate only when requested. Inspect the fresh state for the actual result. "
     "When computer_progress reports a repeated action route, change course if the goal has not advanced."
     " Key aliases are normalized by the shared Dotool driver: prefer canonical names, while common Escape/Return, arrow/page, modifier, and XKB modifier spellings are accepted."
@@ -610,6 +614,12 @@ class ComputerSession:
                 control["image_frame"] = {
                     "x": frame[0], "y": frame[1], "w": frame[2], "h": frame[3],
                 }
+            try:
+                self._dotool_point_for_element(snapshot, row)
+            except (TypeError, ValueError):
+                control["mouse_position_available"] = False
+            else:
+                control["mouse_position_available"] = True
             controls.append(control)
         text = json.dumps({
             "observation_id": snapshot["id"], "scope": "window", "pid": pid,

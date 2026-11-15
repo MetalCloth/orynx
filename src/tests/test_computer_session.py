@@ -125,7 +125,7 @@ class ComputerAccessibilityObservationTests(unittest.TestCase):
             "window_title": "Settings", "window_bounds": {"x": 0, "y": 0, "width": 800, "height": 450},
             "screenshot_width": 800, "screenshot_height": 450,
             "tree_markdown": '- document "Settings"\n  - password text "hunter2"',
-            "total_element_count": 7, "returned_element_count": 7,
+            "total_element_count": 8, "returned_element_count": 8,
             "filtered_element_count": 0, "elements_complete": False,
             "degraded": True, "degraded_reason": "AT-SPI read was partial",
             "truncated": True, "truncation_reason": "max_elements",
@@ -153,6 +153,8 @@ class ComputerAccessibilityObservationTests(unittest.TestCase):
                 {"element_index": 7, "element_token": "toggle", "role": "toggle button",
                  "label": "Notifications", "selected": False, "enabled": True,
                  "frame": {"x": 20, "y": 180, "w": 200, "h": 30}},
+                {"element_index": 8, "element_token": "logical", "role": "button",
+                 "label": "Next tab", "enabled": True, "actions": ["click"]},
             ],
         }
 
@@ -187,9 +189,15 @@ class ComputerAccessibilityObservationTests(unittest.TestCase):
 
             payload = json.loads(result.text)
             controls = {item["index"]: item for item in payload["controls"]}
-            self.assertEqual(len(controls), 7)
+            self.assertEqual(len(controls), 8)
             self.assertEqual(controls[2]["actions"], [])
             self.assertTrue(all("can_click" not in item for item in controls.values()))
+            self.assertFalse(controls[1]["mouse_position_available"])
+            self.assertTrue(controls[2]["mouse_position_available"])
+            self.assertTrue(controls[3]["mouse_position_available"])
+            self.assertFalse(controls[4]["mouse_position_available"])
+            self.assertFalse(controls[8]["mouse_position_available"])
+            self.assertEqual(controls[8]["actions"], ["click"])
             self.assertEqual(controls[2]["parent_label"], "Settings pane")
             self.assertEqual(controls[2]["depth"], 1)
             self.assertEqual(controls[2]["image_frame"], {"x": 20, "y": 20, "w": 200, "h": 30})
@@ -202,13 +210,13 @@ class ComputerAccessibilityObservationTests(unittest.TestCase):
             self.assertFalse(controls[7]["selected"])
             self.assertTrue(payload["degraded"])
             self.assertEqual(payload["truncation_reason"], "max_elements")
-            self.assertEqual(payload["returned_element_count"], 7)
+            self.assertEqual(payload["returned_element_count"], 8)
             self.assertEqual(payload["controls_omitted_count"], 0)
             self.assertIn("omitted", payload["tree_excerpt"])
             self.assertNotIn("hunter2", result.text)
             self.assertNotIn("sk-raw-secret", result.text)
             self.assertNotIn("element_token", result.text)
-            self.assertEqual(set(session.current["elements"]), set(range(1, 8)))
+            self.assertEqual(set(session.current["elements"]), set(range(1, 9)))
             ComputerSession._action(session.current, {"type": "click_element", "element_index": 2})
             with patch.object(session, "_dotool", return_value={"effect": "sent"}) as dotool:
                 session._click(session.current, {"type": "click_element", "element_index": 2})
@@ -228,18 +236,26 @@ class ComputerAccessibilityObservationTests(unittest.TestCase):
                     session._click(session.current, {"type": "click_element", "element_index": 4})
             self.assertEqual(refused.exception.reason, "element_frame_unavailable")
             dotool.assert_not_called()
+            with patch.object(session, "_dotool") as dotool:
+                with self.assertRaises(ActionNotDispatched) as refused:
+                    session._click(session.current, {"type": "click_element", "element_index": 8})
+            self.assertEqual(refused.exception.reason, "element_frame_unavailable")
+            dotool.assert_not_called()
             with self.assertRaisesRegex(ValueError, "absent"):
                 ComputerSession._action(session.current, {"type": "click_element", "element_index": 99})
             old_id = session.current["id"]
             state["elements"].extend(
                 {"element_index": index, "element_token": f"extra-{index}",
                  "role": "entry", "label": f"Extra {index}", "actions": []}
-                for index in range(8, 68)
+                for index in range(9, 68)
             )
             with patch.object(session, "_cua_call", return_value=state):
                 capped = json.loads(session._window(123, 7, False).text)
             self.assertEqual(len(capped["controls"]), 60)
             self.assertEqual(capped["controls_omitted_count"], 7)
+            no_image_controls = {item["index"]: item for item in capped["controls"]}
+            self.assertTrue(no_image_controls[2]["mouse_position_available"])
+            self.assertFalse(no_image_controls[8]["mouse_position_available"])
             with self.assertRaisesRegex(ValueError, "stale"):
                 session._require_snapshot(old_id)
 
