@@ -87,3 +87,17 @@ For `click` and `double_click`, the model supplies a point from the latest scree
 ## Artifacts and scope
 
 The temporary binary, harnesses, and retained JSONL traces are in `/tmp/cua-driver-experiment-v0.32.0`. During this isolated experiment, no Oryn production code, configuration defaults, or provider loop were changed. Pre-existing workspace edits were left untouched. No commit or push was made. Those scope statements describe the experiment, not the later CUA integration or the [current TUI computer-use flow](21-cua-main-loop.md).
+
+## 15 November 2026: Discord window discovery
+
+A later check used the installed CUA Driver 0.32.0. With the accessibility bus enabled and Discord launched using `discord --force-renderer-accessibility`, a standalone AT-SPI inspection could traverse Discord's application, frame, and web document. Discord's tree was available.
+
+The initial `list_windows` call returned no windows because its daemon did not have native Wayland discovery enabled. Restarting the daemon with the flag in its environment fixed window discovery:
+
+```fish
+env CUA_DRIVER_RS_ENABLE_WAYLAND=1 cua-driver serve --socket /home/puneet/.cache/cua-driver/cua-driver.sock
+```
+
+After that, `list_windows` returned Discord and other open windows. Calling `get_window_state` with Discord's returned PID and window ID produced hundreds of controls, with `truncated: false` and a reported `walk_elapsed_ms` of 895. This reproduction isolated the failure to finding the Wayland window, not traversing Discord's AT-SPI tree. It did not establish whether the accessibility-bus setup or Discord's renderer flag can be omitted in other runs. No Rust tree-walker patch or driver upgrade was needed for this reproduction.
+
+For convenience, this Hyprland session now sets `env = CUA_DRIVER_RS_ENABLE_WAYLAND, 1` in `~/.config/hypr/hyprland/env.conf`. Reload Hyprland after changing the file. Oryn's own driver launcher also supplies the flag to its child process; the Hyprland setting covers manually launched CUA commands.
