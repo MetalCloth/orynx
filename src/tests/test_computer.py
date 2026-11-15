@@ -199,10 +199,10 @@ class ComputerTests(unittest.TestCase):
             "confirmation_reason": "",
         }, (800, 450))
         self.assertEqual(parsed["actions"][0]["key"], "ctrl+l")
-        self.assertEqual(parsed["actions"][2]["key"], "Super_L")
+        self.assertEqual(parsed["actions"][2]["key"], "leftmeta")
         self.assertEqual(len(parsed["actions"]), 3)
         parsed = parse_plan(action_plan([{"type": "key", "key": "x:Super_L"}]), (800, 450))
-        self.assertEqual(parsed["actions"][0]["key"], "x:Super_L")
+        self.assertEqual(parsed["actions"][0]["key"], "leftmeta")
 
     def test_plan_parser_rejects_invalid_or_out_of_bounds_actions(self):
         invalid = [

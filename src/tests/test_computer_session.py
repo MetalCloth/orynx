@@ -217,7 +217,7 @@ class ComputerAccessibilityObservationTests(unittest.TestCase):
             with patch.object(session, "_dotool", return_value={"effect": "sent"}) as dotool:
                 session._click(session.current, {"type": "click_element", "element_index": 5})
             self.assertEqual(dotool.call_args.kwargs["target"]["value"], "[redacted]")
-            self.assertEqual(dotool.call_args.kwargs["target"]["frame_space"], "window")
+            self.assertEqual(dotool.call_args.kwargs["target"]["frame_space"], "screen")
             ComputerSession._action(session.current, {"type": "click_element", "element_index": 3})
             with patch.object(session, "_dotool", return_value={"effect": "sent"}) as dotool:
                 session._click(session.current, {"type": "click_element", "element_index": 3})
@@ -260,6 +260,101 @@ class ComputerAccessibilityObservationTests(unittest.TestCase):
         self.assertEqual(controls["[sensitive input]"]["value"], "[redacted]")
         self.assertEqual(controls["API key"]["value"], "[redacted]")
         self.assertNotIn("hunter2", json.dumps(summary))
+
+
+class ComputerElementCoordinateTests(unittest.TestCase):
+    @staticmethod
+    def _session():
+        session = ComputerSession.__new__(ComputerSession)
+        session.driver = SimpleNamespace(
+            monitor_rect=(0.0, 0.0, 1920.0, 1080.0), width=1920, height=1080,
+        )
+        return session
+
+    @staticmethod
+    def _snapshot():
+        return {
+            "bounds": {"x": 735, "y": 340, "width": 500, "height": 400},
+            "size": (500, 400), "image_scope": "window", "elements": {},
+        }
+
+    def test_pavucontrol_screen_frame_dispatches_to_its_screen_center(self):
+        session = self._session()
+        snapshot = self._snapshot()
+        snapshot["elements"][10] = {
+            "role": "toggle button", "label": "Test control",
+            "frame": {"x": 1109, "y": 378, "w": 36, "h": 28},
+            "screenshot_frame": None,
+        }
+        with patch.object(session, "_dotool", return_value={"effect": "sent"}) as send:
+            session._click(snapshot, {"type": "click_element", "element_index": 10})
+        self.assertEqual(send.call_args.args[1]["_dotool_point"], (1127, 392))
+        self.assertEqual(send.call_args.kwargs["target"]["frame_space"], "screen")
+
+        snapshot["image_scope"] = "desktop"
+        snapshot["size"] = (1920, 1080)
+        self.assertEqual(session._dotool_point_for_element(snapshot, snapshot["elements"][10]),
+                         (1127, 392))
+
+    def test_screenshot_frame_takes_precedence_and_scales_with_image(self):
+        session = self._session()
+        snapshot = self._snapshot()
+        snapshot["size"] = (250, 200)
+        row = {
+            "frame": {"x": 0, "y": 0, "w": 20, "h": 20},
+            "screenshot_frame": {"x": 187, "y": 19, "w": 18, "h": 14},
+        }
+        self.assertEqual(session._dotool_point_for_element(snapshot, row), (1127, 392))
+        row["screenshot_frame"]["x"] = 250
+        with self.assertRaisesRegex(ValueError, "outside the current window image"):
+            session._dotool_point_for_element(snapshot, row)
+
+    def test_missing_invalid_and_outside_frames_never_dispatch(self):
+        session = self._session()
+        snapshot = self._snapshot()
+        frames = [
+            None,
+            {"x": 1109, "y": 378, "w": 0, "h": 28},
+            {"x": float("nan"), "y": 378, "w": 36, "h": 28},
+            {"x": 700, "y": 378, "w": 2, "h": 28},
+            {"x": 1235, "y": 378, "w": 2, "h": 28},
+            {"x": 1109, "y": 300, "w": 36, "h": 2},
+            {"x": 1109, "y": 740, "w": 36, "h": 2},
+        ]
+        with patch.object(session, "_dotool") as send:
+            for frame in frames:
+                with self.subTest(frame=frame):
+                    snapshot["elements"][10] = {"role": "button", "label": "Test", "frame": frame}
+                    with self.assertRaises(ActionNotDispatched):
+                        session._click(snapshot, {"type": "click_element", "element_index": 10})
+            snapshot["elements"][10]["frame"] = {"x": 1109, "y": 378, "w": 36, "h": 28}
+            snapshot["bounds"] = None
+            with self.assertRaises(ActionNotDispatched):
+                session._click(snapshot, {"type": "click_element", "element_index": 10})
+            snapshot["bounds"] = {"x": 1800, "y": 340, "width": 500, "height": 400}
+            snapshot["elements"][10]["frame"] = {"x": 2000, "y": 378, "w": 36, "h": 28}
+            with self.assertRaises(ActionNotDispatched):
+                session._click(snapshot, {"type": "click_element", "element_index": 10})
+            send.assert_not_called()
+
+    def test_one_pixel_and_slightly_clipped_frames_stay_inside_window(self):
+        session = self._session()
+        snapshot = self._snapshot()
+        for frame, expected in [
+            ({"x": 735, "y": 340, "w": 1, "h": 1}, (735, 340)),
+            ({"x": 1234, "y": 739, "w": 1, "h": 1}, (1234, 739)),
+            ({"x": 734, "y": 339, "w": 77, "h": 25}, (772, 351)),
+        ]:
+            with self.subTest(frame=frame):
+                self.assertEqual(session._dotool_point_for_element(snapshot, {"frame": frame}), expected)
+
+        snapshot["elements"][10] = {
+            "role": "button", "label": "Test",
+            "screenshot_frame": {"x": 499, "y": 399, "w": 1, "h": 1},
+        }
+        with patch.object(session, "_dotool", return_value={"effect": "sent"}) as send:
+            session._click(snapshot, {"type": "click_element", "element_index": 10})
+        self.assertEqual(send.call_args.args[1]["_dotool_point"], (1234, 739))
 
 
 if __name__ == "__main__":

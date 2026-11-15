@@ -27,7 +27,7 @@ class CuaDriverTests(unittest.TestCase):
         driver._tree = '- frame = "Test"\n    - label = "Result: empty"'
         driver._rows = [{"role": "entry", "label": "Test token input", "enabled": True,
                          "actions": ["activate"], "element_index": 12, "element_token": "token",
-                         "frame": {"x": 20, "y": 53, "w": 1768, "h": 28}}]
+                         "frame": {"x": 101, "y": 84, "w": 1768, "h": 28}}]
         with patch.object(driver, "active_window_stamp", return_value=driver._snapshot_stamp), \
              patch.object(driver, "_call", return_value={"effect": "confirmed"}) as call, \
              patch.object(HyprlandDriver, "execute") as dotool:
@@ -50,6 +50,15 @@ class CuaDriverTests(unittest.TestCase):
             self.assertEqual(dotool.call_count, 2)
             dotool.assert_any_call("hotkey", {"key": "leftmeta"})
             self.assertEqual(call.call_count, 2)
+
+    def test_screen_frame_box_does_not_add_window_origin(self):
+        driver = CuaDriver.__new__(CuaDriver)
+        driver.width, driver.height = 1920, 1080
+        driver._snapshot_stamp = ("window", 0, (735, 340), (500, 400))
+        driver._window = {"bounds": {"x": 735, "y": 340, "width": 500, "height": 400}}
+        self.assertEqual(driver._box({"frame": {"x": 1109, "y": 378, "w": 36, "h": 28}}),
+                         (1109, 378, 36, 28))
+        self.assertIsNone(driver._box({"frame": {"x": 1920, "y": 378, "w": 36, "h": 28}}))
 
     def test_default_driver_closes_after_task(self):
         class FakeDriver:

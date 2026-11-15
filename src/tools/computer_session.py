@@ -8,7 +8,7 @@ import subprocess
 import time
 import uuid
 from dataclasses import dataclass, field
-from math import isfinite
+from math import floor, isfinite
 from threading import Event
 from typing import Any, Callable
 
@@ -1148,7 +1148,7 @@ class ComputerSession:
                 x, y, width, height = image_frame
                 if (x < 0 or y < 0 or x + width > size[0] or y + height > size[1]):
                     raise ValueError("The control frame falls outside the current window image.")
-                return self._dotool_point_from_image(snapshot, round(x + width / 2), round(y + height / 2))
+                return self._dotool_point_from_image(snapshot, floor(x + width / 2), floor(y + height / 2))
 
         frame = self._frame_values(row.get("frame"))
         bounds = self._bounds_values(snapshot.get("bounds"))
@@ -1157,9 +1157,12 @@ class ComputerSession:
         x, y, width, height = frame
         center_x, center_y = x + width / 2, y + height / 2
         bounds_x, bounds_y, bounds_width, bounds_height = bounds
-        if not (0 <= center_x < bounds_width and 0 <= center_y < bounds_height):
+        # CUA frame is screen-relative; screenshot_frame above is image-relative.
+        point_x, point_y = floor(center_x), floor(center_y)
+        if not (bounds_x <= point_x < bounds_x + bounds_width
+                and bounds_y <= point_y < bounds_y + bounds_height):
             raise ValueError("The control frame is outside the observed window.")
-        return self._monitor_point(bounds_x + center_x, bounds_y + center_y)
+        return self._monitor_point(point_x, point_y)
 
     @staticmethod
     def _patch_changed(before: Image.Image, after: Image.Image) -> tuple[bool, float]:
@@ -1483,7 +1486,7 @@ class ComputerSession:
                 "element_index": action["element_index"], "role": row.get("role"),
                 "label": label, "value": value,
                 "frame": row.get("screenshot_frame") if image_frame else row.get("frame"),
-                "frame_space": "observation_image" if image_frame else "window",
+                "frame_space": "observation_image" if image_frame else "screen",
             }
             return self._dotool(
                 snapshot, {"type": "click", "_dotool_point": point},

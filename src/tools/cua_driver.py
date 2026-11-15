@@ -206,7 +206,7 @@ class CuaDriver(HyprlandDriver):
         frame = row.get("frame")
         if not isinstance(frame, dict) or any(type(frame.get(key)) not in (int, float) for key in ("x", "y", "w", "h")):
             return None
-        x, y = self._window["bounds"]["x"] + frame["x"], self._window["bounds"]["y"] + frame["y"]
+        x, y = frame["x"], frame["y"]
         w, h = frame["w"], frame["h"]
         if w <= 0 or h <= 0 or x < 0 or y < 0 or x + w > self.width or y + h > self.height:
             return None
