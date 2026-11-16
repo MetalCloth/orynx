@@ -100,6 +100,7 @@ class HyprlandDriver:
                 layouts.append((x, y, width, height))
             selected = next(item for item in active_monitors if item["id"] == self.monitor_id)
             scale = float(selected.get("scale", 1))
+            self.transform = selected.get("transform")
             self.monitor_rect = (
                 float(selected["x"]), float(selected["y"]),
                 float(selected["width"]) / scale, float(selected["height"]) / scale,

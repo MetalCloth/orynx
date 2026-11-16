@@ -1269,6 +1269,46 @@ class ComputerSession:
         finally:
             path.unlink(missing_ok=True)
 
+    def _preflight_window_patch(self, snapshot: dict, box: tuple[int, int, int, int]) -> Image.Image | None:
+        if not self.cua or snapshot.get("mode") != "window" or snapshot.get("image_scope") != "window":
+            return None
+        bounds = self._bounds_values(snapshot.get("bounds"))
+        monitor = (0.0, 0.0, float(self.driver.width), float(self.driver.height))
+        if (not bounds or any(value != int(value) for value in bounds)
+                or snapshot.get("size") != (bounds[2], bounds[3])
+                or type(self.driver.transform) is not int or self.driver.transform != 0
+                or self.driver.monitor_rect != monitor or self.driver.desktop_bounds != monitor):
+            return None
+        x, y = int(bounds[0]) + box[0], int(bounds[1]) + box[1]
+        width, height = box[2] - box[0], box[3] - box[1]
+        if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > self.driver.width or y + height > self.driver.height:
+            return None
+        try:
+            self._check_cancel()
+            result = subprocess.run(
+                ["grim", "-g", f"{x},{y} {width}x{height}", "-t", "png", "-l", "0", "-"],
+                capture_output=True, check=True, timeout=2,
+            )
+            self._check_cancel()
+            stamp = self.driver.active_window_stamp()
+            target = self._active_target(stamp, timeout=3)
+        except InterruptedError:
+            raise
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            self._check_cancel()
+            return None
+        if target is None:
+            return None
+        if target != (snapshot.get("pid"), snapshot.get("window_id")):
+            raise ActionNotDispatched("dotool", "target_changed", "The selected window changed; no click was sent.")
+        try:
+            with Image.open(io.BytesIO(result.stdout)) as image:
+                if image.format != "PNG" or image.size != (width, height):
+                    return None
+                return image.convert("RGB")
+        except (OSError, ValueError):
+            return None
+
     def _preflight_pixel_click(self, snapshot: dict, action: dict,
                                trace_context: dict[str, Any] | None) -> None:
         encoded = snapshot.get("image_data")
@@ -1288,8 +1328,19 @@ class ComputerSession:
         expected_size = snapshot["size"] if snapshot["image_scope"] == "window" else (
             self.driver.width, self.driver.height,
         )
+        capture_routes = set()
 
         def capture_patch(size: tuple[int, int]) -> Image.Image:
+            patch = self._preflight_window_patch(snapshot, box)
+            if patch is not None:
+                capture_routes.add("region")
+                try:
+                    self._check_sequence_target(snapshot)
+                except BaseException:
+                    patch.close()
+                    raise
+                return patch
+            capture_routes.add("full")
             data, actual_size = self._preflight_image(snapshot)
             if actual_size != expected_size:
                 raise RuntimeError("The selected image changed size.")
@@ -1327,6 +1378,7 @@ class ComputerSession:
             if self.trace:
                 self.trace.write("computer_target_preflight", **(trace_context or {}),
                                  changed=changed, settled=settled, average_difference=average,
+                                 capture_routes=sorted(capture_routes),
                                  observation_age_ms=round((time.monotonic() - snapshot["captured_at"]) * 1000))
         except ActionNotDispatched:
             raise

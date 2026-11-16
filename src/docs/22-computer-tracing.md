@@ -103,6 +103,8 @@ needed.
 
 Pixel clicks log a computer_target_preflight event with the target-area comparison,
 observation age, and whether a changed area settled before Oryn returned a new image.
+Its `capture_routes` field records whether the check used a small `region`, a `full`
+capture, or both after a fallback.
 Single desktop key actions can log computer_ui_settle when their changed region needs
 another look. Repeated action patterns can log computer_progress_hint. Follow-up
 observations are not blocked by a fixed count. These events describe harness behavior;

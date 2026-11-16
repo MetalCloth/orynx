@@ -1,4 +1,7 @@
+import base64
+import io
 import json
+import subprocess
 import threading
 import unittest
 from pathlib import Path
@@ -375,6 +378,118 @@ class ComputerElementCoordinateTests(unittest.TestCase):
         with patch.object(session, "_dotool", return_value={"effect": "sent"}) as send:
             session._click(snapshot, {"type": "click_element", "element_index": 10})
         self.assertEqual(send.call_args.args[1]["_dotool_point"], (1234, 739))
+
+
+class ComputerPreflightTests(unittest.TestCase):
+    @staticmethod
+    def _image(size, color="white", image_format="PNG"):
+        data = io.BytesIO()
+        with Image.new("RGB", size, color) as image:
+            image.save(data, format=image_format)
+        return data.getvalue()
+
+    def setUp(self):
+        self.session = ComputerSession.__new__(ComputerSession)
+        self.session.cua = True
+        self.session.trace = None
+        self.session.cancel_event = threading.Event()
+        self.session.driver = SimpleNamespace(
+            width=800, height=600, transform=0,
+            monitor_rect=(0.0, 0.0, 800.0, 600.0),
+            desktop_bounds=(0.0, 0.0, 800.0, 600.0),
+            active_window_stamp=Mock(return_value=("0x1", 0, (100, 50), (400, 300))),
+        )
+        self.session._active_target = Mock(return_value=(123, 42))
+        self.session._check_sequence_target = Mock()
+        self.session._focus_for_dotool = Mock()
+        self.full_image = self._image((400, 300))
+        self.session._preflight_image = Mock(return_value=(self.full_image, (400, 300)))
+        self.snapshot = {
+            "mode": "window", "pid": 123, "window_id": 42,
+            "bounds": {"x": 100, "y": 50, "width": 400, "height": 300},
+            "size": (400, 300), "image_scope": "window",
+            "image_data": base64.b64encode(self.full_image).decode(),
+        }
+        self.action = {"type": "click", "x": 100, "y": 80}
+
+    def test_stable_target_uses_small_capture_and_checks_identity_before_input(self):
+        response = SimpleNamespace(stdout=self._image((73, 49)))
+        with (patch("src.tools.computer_session.subprocess.run", return_value=response) as capture,
+              patch.object(HyprlandDriver, "execute") as send):
+            result = self.session._dotool(self.snapshot, self.action)
+        self.assertEqual(result["effect"], "sent")
+        self.assertEqual(capture.call_args.args[0][1:3], ["-g", "164,106 73x49"])
+        self.session._active_target.assert_called_once()
+        self.session._check_sequence_target.assert_called_once()
+        self.session._preflight_image.assert_not_called()
+        send.assert_called_once()
+
+    def test_changed_target_refuses_without_input(self):
+        response = SimpleNamespace(stdout=self._image((73, 49), "black"))
+        with (patch("src.tools.computer_session.subprocess.run", return_value=response),
+              patch.object(self.session.cancel_event, "wait", return_value=False),
+              patch.object(HyprlandDriver, "execute") as send):
+            with self.assertRaises(ActionNotDispatched) as error:
+                self.session._dotool(self.snapshot, self.action)
+        self.assertEqual(error.exception.reason, "target_changed")
+        send.assert_not_called()
+
+    def test_replaced_window_with_identical_pixels_is_refused(self):
+        self.session._active_target.return_value = (123, 99)
+        response = SimpleNamespace(stdout=self._image((73, 49)))
+        with (patch("src.tools.computer_session.subprocess.run", return_value=response),
+              patch.object(HyprlandDriver, "execute") as send):
+            with self.assertRaises(ActionNotDispatched) as error:
+                self.session._dotool(self.snapshot, self.action)
+        self.assertEqual(error.exception.reason, "target_changed")
+        self.session._preflight_image.assert_not_called()
+        send.assert_not_called()
+
+    def test_uncertain_or_failed_fast_capture_falls_back_to_full_check(self):
+        cases = ("rotated", "different_size", "timeout", "bad_image", "unknown_identity", "lookup_error")
+        for case in cases:
+            with self.subTest(case=case):
+                self.setUp()
+                response = SimpleNamespace(stdout=self._image((73, 49)))
+                if case == "rotated":
+                    self.session.driver.transform = 1
+                elif case == "different_size":
+                    self.snapshot["bounds"]["width"] = 401
+                elif case == "timeout":
+                    response = subprocess.TimeoutExpired("grim", 2)
+                elif case == "bad_image":
+                    response.stdout = self._image((1, 1))
+                elif case == "unknown_identity":
+                    self.session._active_target.return_value = None
+                elif case == "lookup_error":
+                    self.session._active_target.side_effect = RuntimeError("not available")
+                runner = {"side_effect": response} if isinstance(response, Exception) else {"return_value": response}
+                with (patch("src.tools.computer_session.subprocess.run", **runner),
+                      patch.object(HyprlandDriver, "execute") as send):
+                    result = self.session._dotool(self.snapshot, self.action)
+                self.assertEqual(result["effect"], "sent")
+                self.session._preflight_image.assert_called_once()
+                send.assert_called_once()
+
+    def test_cancellation_after_capture_never_sends_input(self):
+        def cancel(*_args, **_kwargs):
+            self.session.cancel_event.set()
+            return SimpleNamespace(stdout=self._image((73, 49)))
+        with (patch("src.tools.computer_session.subprocess.run", side_effect=cancel),
+              patch.object(HyprlandDriver, "execute") as send):
+            with self.assertRaises(InterruptedError):
+                self.session._dotool(self.snapshot, self.action)
+        self.session._preflight_image.assert_not_called()
+        send.assert_not_called()
+
+    def test_screen_edge_uses_a_clipped_region(self):
+        self.action.update(x=0, y=0)
+        response = SimpleNamespace(stdout=self._image((37, 25)))
+        with (patch("src.tools.computer_session.subprocess.run", return_value=response) as capture,
+              patch.object(HyprlandDriver, "execute") as send):
+            self.session._dotool(self.snapshot, self.action)
+        self.assertEqual(capture.call_args.args[0][1:3], ["-g", "100,50 37x25"])
+        send.assert_called_once()
 
 
 class ComputerActionRecoveryTests(unittest.TestCase):
