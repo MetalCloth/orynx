@@ -41,6 +41,8 @@ private text; structured control values still use Oryn's keyword-based redaction
 When a document is exposed, its
 controls come before browser chrome in that bounded list.
 `mode="windows"` has no image but supplies an `observation_id` for `focus_window`;
+if an input other than focus is attempted from that list, Oryn sends no input and returns
+a fresh desktop observation.
 `mode="desktop"` always has an image. `image=false` can skip an
 exact-window screenshot, but an active-mode fallback can still return a desktop image.
 The full desktop overview uses the monitor's native pixel dimensions. Zooming is optional for
@@ -113,6 +115,8 @@ Every `computer_act` call needs an `expected_result` that describes the visible 
 expected after the input. This is prose for the model to compare with the result; the harness
 does not automatically test it. Use `wait_for` for a supported exact native condition.
 Put every input in `action`, an array containing 1–5 input objects.
+The runtime also accepts a single action object as a shorthand; the advertised schema
+uses the array form.
 One item sends one input; 2–5 items send a sequence when every step is already grounded. Put literal
 text and numbers in a `type` action's `text` field, not its `key` field. Its result already includes a
 fresh observation. Additional `computer_observe` or `computer_wait` calls can follow when the UI
@@ -123,12 +127,15 @@ The input result `sent` means the dotool command completed. The model checks the
 observation or an exact `verify_state` result before claiming that the app changed. For
 `computer_act`, `refused` means Oryn stopped the requested input before dispatch;
 `unknown` means its occurrence is uncertain.
+For `computer_act` and `computer_wait`, an expired observation ID returns a fresh
+observation without sending input or running the wait predicate.
+If the target changes before a click, Oryn refuses the click and returns a fresh view.
 
 For longer tasks, `computer_task({"operation":"record","updates":[...]})` can mark up to
 eight steps and six done checks in one call. Each item names `kind` (`step` or `check`), a
 `name` from the saved task, a valid `status`, and evidence for `verified` or `blocked`.
-Step statuses are `working`, `verified`, or `blocked`; check statuses are `pending` or
-`verified`. For a saved step named “Open Settings”, an update can be:
+Both steps and checks accept `pending`, `working`, `verified`, and `blocked`. A `verified`
+or `blocked` update needs evidence. For a saved step named “Open Settings”, an update can be:
 
 ```json
 {
@@ -145,9 +152,9 @@ fields still work for existing callers but are no longer advertised to the model
 If the next action is already clear from
 the last observation, the model can issue `record` before `computer_act` in the same
 response. After the final result, it can issue `record` then `finish` together. It must
-never record evidence from an action it has not yet seen. `finish` can reuse evidence
-from a verified done check once both remaining
-lists are empty.
+never record evidence from an action it has not yet seen. `finish(result="complete")`
+requires every done check to be verified; unused planned steps may remain. It can reuse
+evidence from a verified done check.
 
 ## What stays in history
 

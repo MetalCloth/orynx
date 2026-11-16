@@ -5,6 +5,9 @@ from collections.abc import Callable
 from typing import Any
 
 
+TASK_ITEM_STATUSES = ("pending", "working", "verified", "blocked")
+
+
 def computer_task_schema() -> dict[str, Any]:
     return {
         "type": "function", "name": "computer_task",
@@ -13,7 +16,8 @@ def computer_task_schema() -> dict[str, Any]:
             "resume later. One outcome, such as opening one file, needs no record even if it takes several "
             "UI actions. Start with a goal, distinctly named done checks, and distinctly named short steps. "
             "Record all observed step/check progress in one updates batch, identifying each item by its exact name from the task record, "
-            "with evidence inside each verified or blocked item; finish only after checking the result. "
+            "with evidence inside each verified or blocked item; finish complete when all done checks "
+            "are verified, even if an unused planned step remains. "
             "The result lists remaining step/check names. This stores the model's record, not an "
             "automatic success verdict. "
             "The environment binds remote browser versus "
@@ -37,7 +41,8 @@ def computer_task_schema() -> dict[str, Any]:
                 "type": "object", "additionalProperties": False, "properties": {
                     "kind": {"type": "string", "enum": ["step", "check"]},
                     "name": {"type": "string", "description": "Exact step or done-check name from the current task record; do not use a numeric position."},
-                    "status": {"type": "string", "enum": ["pending", "working", "verified", "blocked"]},
+                    "status": {"type": "string", "enum": list(TASK_ITEM_STATUSES),
+                               "description": "Both steps and checks use these states. Verified or blocked needs evidence."},
                     "evidence": {"type": "string", "description": "Required for verified or blocked updates."},
                 }, "required": ["kind", "name", "status"],
             }, "description": "Record only: use the exact step/check name shown in the saved task, e.g. {kind: step, name: Open Blender, status: verified}; put evidence in each item, not at the top level."},
@@ -164,13 +169,13 @@ class ComputerTaskLedger:
                     if type(index) is not int or not 1 <= index <= len(state["steps"]):
                         raise ValueError("step_index must name a current 1-based step.")
                     status = args.get("step_status")
-                    if status not in ("working", "verified", "blocked"):
-                        raise ValueError("A recorded step needs step_status=working, verified, or blocked.")
+                    if status not in TASK_ITEM_STATUSES:
+                        raise ValueError("A recorded step needs step_status=pending, working, verified, or blocked.")
                     if status in ("verified", "blocked"):
                         evidence = _text(evidence, "evidence", 500)
                     elif evidence:
                         evidence = _text(evidence, "evidence", 500)
-                    state["steps"][index - 1].update(status=status, evidence=evidence)
+                    state["steps"][index - 1].update(status=status, evidence="" if status == "pending" else evidence)
                     verified_step = status == "verified"
                 elif "step_status" in args:
                     raise ValueError("step_status needs step_index.")
@@ -179,9 +184,10 @@ class ComputerTaskLedger:
                     if type(index) is not int or not 1 <= index <= len(state["done_checks"]):
                         raise ValueError("check_index must name a current 1-based done check.")
                     status = args.get("check_status")
-                    if status not in ("pending", "verified"):
-                        raise ValueError("A recorded done check needs check_status=pending or verified.")
-                    check_evidence = _text(evidence, "evidence", 500) if status == "verified" else ""
+                    if status not in TASK_ITEM_STATUSES:
+                        raise ValueError("A recorded done check needs check_status=pending, working, verified, or blocked.")
+                    check_evidence = (_text(evidence, "evidence", 500) if status in ("verified", "blocked")
+                                      or (status == "working" and evidence) else "")
                     state["done_checks"][index - 1].update(status=status, evidence=check_evidence)
                 elif "check_status" in args:
                     raise ValueError("check_status needs check_index.")
@@ -212,11 +218,10 @@ class ComputerTaskLedger:
                         if (kind, name_key) in seen:
                             raise ValueError(f"Duplicate {kind} update for {name!r}; include it only once.")
                         seen.add((kind, name_key))
-                        allowed = ("working", "verified", "blocked") if kind == "step" else ("pending", "verified")
-                        if status not in allowed:
+                        if status not in TASK_ITEM_STATUSES:
                             raise ValueError(
                                 f"{kind} {name!r} cannot use status {status!r}; "
-                                f"use one of: {', '.join(allowed)}."
+                                f"use one of: {', '.join(TASK_ITEM_STATUSES)}."
                             )
                         item_evidence = update.get("evidence", "")
                         if status in ("verified", "blocked"):
@@ -240,12 +245,8 @@ class ComputerTaskLedger:
                 result = args.get("result")
                 if result not in ("complete", "blocked"):
                     raise ValueError("Finish with result=complete or blocked.")
-                pending_steps = [step["description"] for step in state["steps"]
-                                 if step["status"] != "verified"]
                 pending_checks = [check["description"] for check in state["done_checks"]
                                   if check["status"] != "verified"]
-                if result == "complete" and pending_steps:
-                    raise ValueError(f"Verify planned step(s) by name before marking the task complete: {'; '.join(pending_steps)}.")
                 if result == "complete" and pending_checks:
                     raise ValueError(f"Verify done check(s) by name before marking the task complete: {'; '.join(pending_checks)}.")
                 state["status"] = result

@@ -7,11 +7,41 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import Mock
 
+from src.agent.computer_task import ComputerTaskLedger
 from src.session.sqlite_store import SQLiteSessionStore
 from src.tools.file_tools import FileChange, undo_file_change, write_file
 
 
 class SQLiteSessionStoreTests(unittest.TestCase):
+    def test_resumes_task_with_blocked_and_working_checks(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "sessions.sqlite3"
+            store = SQLiteSessionStore(path)
+            session = store.create_session(Path(folder))
+            ledger = ComputerTaskLedger(save=lambda state: store.save_computer_task(session, state))
+            ledger.apply({"operation": "start", "goal": "Check two windows",
+                          "environment": "local_desktop", "steps": ["Unused backup route"],
+                          "done_checks": ["First window", "Second window"]})
+            ledger.apply({"operation": "record", "updates": [
+                {"kind": "check", "name": "First window", "status": "blocked", "evidence": "Not visible"},
+                {"kind": "check", "name": "Second window", "status": "working"},
+            ]})
+            ledger.apply({"operation": "finish", "result": "blocked", "evidence": "Not visible"})
+
+            reopened = SQLiteSessionStore(path)
+            saved = reopened.load_computer_task(session)
+            self.assertIsNotNone(saved)
+            self.assertEqual([item["status"] for item in saved["done_checks"]], ["blocked", "working"])
+            resumed = ComputerTaskLedger(saved, lambda state: reopened.save_computer_task(session, state))
+            resumed.apply({"operation": "record", "updates": [
+                {"kind": "check", "name": name, "status": "verified", "evidence": "Window visible"}
+                for name in ("First window", "Second window")
+            ]})
+            resumed.apply({"operation": "finish", "result": "complete"})
+            saved = SQLiteSessionStore(path).load_computer_task(session)
+            self.assertEqual(saved["status"], "complete")
+            self.assertEqual(saved["steps"][0]["status"], "pending")
+
     def test_picker_metadata_migrates_and_persists_without_inventing_legacy_dates(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "sessions.sqlite3"

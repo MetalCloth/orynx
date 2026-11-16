@@ -4,12 +4,14 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from PIL import Image
 
 from src.tools.computer_driver import HyprlandDriver
-from src.tools.computer_session import ActionNotDispatched, ComputerResult, ComputerSession
+from src.tools.computer_session import (
+    ActionNotDispatched, ComputerResult, ComputerSession, StaleDesktopZoom,
+)
 
 
 class ComputerActionBatchTests(unittest.TestCase):
@@ -373,6 +375,118 @@ class ComputerElementCoordinateTests(unittest.TestCase):
         with patch.object(session, "_dotool", return_value={"effect": "sent"}) as send:
             session._click(snapshot, {"type": "click_element", "element_index": 10})
         self.assertEqual(send.call_args.args[1]["_dotool_point"], (1234, 739))
+
+
+class ComputerActionRecoveryTests(unittest.TestCase):
+    @staticmethod
+    def _session(snapshot=None, *, dry_run=False):
+        session = ComputerSession.__new__(ComputerSession)
+        session.current = snapshot
+        session.cancel_event = threading.Event()
+        session.dry_run = dry_run
+        session.dry_run_used = False
+        session.trace = None
+        session._recent_actions = []
+        session._last_expected_result = ""
+        session.goal = ""
+        return session
+
+    def test_old_turn_id_returns_fresh_observation_without_input(self):
+        session = self._session()
+        fresh = ComputerResult('{"observation_id":"fresh","scope":"desktop"}')
+        with patch.object(session, "_desktop", return_value=fresh) as observe, \
+             patch.object(session, "_dotool") as send:
+            result = session.execute("computer_act", {
+                "observation_id": "old", "action": [{"type": "key", "key": "esc"}],
+                "expected_result": "The menu closes.",
+            })
+        outcome, observation = map(json.loads, result.text.splitlines())
+        self.assertEqual(outcome["action_outcome"]["reason"], "stale_observation_id")
+        self.assertEqual(observation["observation_id"], "fresh")
+        observe.assert_called_once()
+        send.assert_not_called()
+
+    def test_old_focus_id_returns_fresh_windows_list(self):
+        session = self._session()
+        fresh = ComputerResult('{"observation_id":"new-list","scope":"windows"}')
+        with patch.object(session, "_windows", return_value=fresh) as observe, \
+             patch.object(session, "_focus_window") as focus:
+            result = session.act({"observation_id": "old",
+                                  "action": [{"type": "focus_window", "window_index": 1}],
+                                  "expected_result": "The app is focused."})
+        outcome, observation = map(json.loads, result.text.splitlines())
+        self.assertEqual(outcome["action_outcome"]["reason"], "stale_observation_id")
+        self.assertEqual(observation["observation_id"], "new-list")
+        observe.assert_called_once()
+        focus.assert_not_called()
+
+    def test_old_wait_id_returns_fresh_observation_without_verifying(self):
+        session = self._session()
+        fresh = ComputerResult('{"observation_id":"fresh","scope":"desktop"}')
+        with patch.object(session, "_desktop", return_value=fresh) as observe, \
+             patch.object(session, "_verify") as verify:
+            result = session.wait({"observation_id": "old", "expect": {"window": {"exists": True}}})
+        outcome, observation = map(json.loads, result.text.splitlines())
+        self.assertEqual(outcome["wait_outcome"]["status"], "not_run")
+        self.assertEqual(observation["observation_id"], "fresh")
+        observe.assert_called_once()
+        verify.assert_not_called()
+
+    def test_windows_list_key_returns_desktop_image_without_input(self):
+        session = self._session({"id": "windows-id", "mode": "windows", "used": False})
+        session.trace = Mock()
+        fresh = ComputerResult('{"observation_id":"desktop-id","scope":"desktop"}',
+                               [{"base64_data": "image"}])
+        with patch.object(session, "_desktop", return_value=fresh) as observe, \
+             patch.object(session, "_dotool") as send:
+            result = session.act({"observation_id": "windows-id",
+                                  "action": [{"type": "key", "key": "super"}],
+                                  "expected_result": "The launcher opens."})
+        outcome, observation = map(json.loads, result.text.splitlines())
+        self.assertEqual(outcome["action_outcome"]["reason"], "windows_list_has_no_image")
+        self.assertEqual(observation["scope"], "desktop")
+        self.assertEqual(result.images, fresh.images)
+        observe.assert_called_once()
+        send.assert_not_called()
+        event = session.trace.write.call_args
+        self.assertEqual(event.args[0], "computer_action_result")
+        self.assertEqual(event.kwargs["outcome"]["effect"], "refused")
+
+    def test_one_action_object_is_accepted_as_shorthand(self):
+        snapshot = {"id": "current", "mode": "desktop", "used": False}
+        session = self._session(snapshot, dry_run=True)
+        result = session.act({"observation_id": "current", "action": {"type": "key", "key": "esc"},
+                              "expected_result": "The menu closes."})
+        self.assertIn('"type": "key"', result.text)
+        self.assertTrue(snapshot["used"])
+
+    def test_changed_focus_during_zoom_returns_fresh_full_desktop(self):
+        session = self._session({"id": "overview", "mode": "desktop", "used": False,
+                                 "image_scope": "desktop", "size": (800, 600), "stamp": "before"})
+        session.driver = SimpleNamespace(width=800, height=600)
+        fresh = ComputerResult('{"observation_id":"new","scope":"desktop"}')
+        with patch.object(session, "_desktop", side_effect=[StaleDesktopZoom("focus changed"), fresh]):
+            result = session._desktop_zoom("overview", {"x": 0, "y": 0, "width": 100, "height": 100})
+        outcome, observation = map(json.loads, result.text.splitlines())
+        self.assertEqual(outcome["zoom_aborted"], "desktop_focus_changed")
+        self.assertEqual(observation["observation_id"], "new")
+
+    def test_changed_click_target_refuses_input_and_returns_fresh_state(self):
+        snapshot = {"id": "current", "mode": "desktop", "used": False, "size": (800, 600)}
+        session = self._session(snapshot)
+        fresh = ComputerResult('{"observation_id":"after","scope":"desktop"}')
+        with patch.object(session, "_click", side_effect=ActionNotDispatched(
+                "dotool", "target_changed", "No click sent.")) as click, \
+             patch.object(session, "_fresh_after", return_value=(fresh, None)) as observe:
+            result = session.act({"observation_id": "current",
+                                  "action": [{"type": "click", "x": 10, "y": 10}],
+                                  "expected_result": "The button opens."})
+        outcome, observation = map(json.loads, result.text.splitlines())
+        self.assertEqual(outcome["action_outcome"]["effect"], "refused")
+        self.assertEqual(outcome["action_outcome"]["reason"], "target_changed")
+        self.assertEqual(observation["observation_id"], "after")
+        click.assert_called_once()
+        observe.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -337,7 +337,7 @@ class SQLiteSessionStore:
                 or task.get("status") not in ("active", "blocked", "complete")
                 or not isinstance(task.get("next_step"), str)
                 or not isinstance(task.get("done_checks"), list) or not 1 <= len(task["done_checks"]) <= 6
-                or not all(isinstance(check, dict) and check.get("status") in ("pending", "verified")
+                or not all(isinstance(check, dict) and check.get("status") in ("pending", "working", "verified", "blocked")
                            for check in task["done_checks"])
                 or not isinstance(task.get("steps"), list) or not 1 <= len(task["steps"]) <= 8
                 or not all(isinstance(step, dict) and step.get("status") in ("pending", "working", "verified", "blocked")

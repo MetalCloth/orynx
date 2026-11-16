@@ -37,6 +37,7 @@ Before every computer_act, state a short expected_result describing the visible 
 
 
 COMPUTER_INSTRUCTIONS += (
+    "\nObservation IDs from earlier user turns have expired. Start a new turn with computer_observe before input, even if chat history shows an old ID. "
     "\nPixel clicks compare the target area just before input. If target_changed is returned, no click was sent; "
     "use the fresh image to choose a new point. A single desktop key action may briefly settle a changed area; "
     "ui_stability=changing means inspect or wait before a pixel click. "
@@ -84,7 +85,7 @@ def computer_tool_schemas() -> list[dict[str, Any]]:
         {"type": "function", "name": "computer_act", "description":
          "Send one action, or a predictable sequence of up to five inputs, from the latest observation_id. Five is a ceiling, not a target; stop when a step changes the screen or the next action needs a new observation. Prefer one sequence over separate model turns when the latest observation already determines the whole sequence; one fresh observation follows it. Safe same-window text sequences (type then Enter, or ctrl+l then type and optional Enter) from active/exact-window observations run in one Dotool process; use them only when no intermediate input can switch or close the target window. Other sequences retain per-step target checks. Do not batch opening an unseen menu, overlay, or app with actions that depend on its new screen. Before typing into newly revealed UI, find the intended input in the fresh image or tree; use computer_wait for an uncertain exact native control. The action that submits or starts navigation must be last, with no actions after the expected screen change. Before every action, provide a short expected_result describing the visible or native state the returned observation should show. focus_window uses a window_index from a mode=windows observation, checks the selected Hyprland window, focuses it, and returns a fresh image and CUA tree when available; it cannot be chained. click_element needs a numbered scope=window control, never desktop labels. Unmappable frames are refused before input. Supply every input in the action array: one item for a single input, or 2–5 items for a predictable sequence. For example, one Enter uses a one-item array; Ctrl+L, typing a URL, then Enter uses three items. Literal text or numbers use a type action with text, not key. A sequence may contain keys alone, optionally one single-line type step, and at most one click first; it stops if the target changes or input is uncertain. It consumes the ID and returns each outcome plus one fresh observation. Inspect the action outcome, optional verify_state, and fresh observation before dependent input. Never replay uncertain input. wait_for checks one native predicate; image=false skips the next screenshot only when that exact check succeeds. Computer input runs without a confirmation prompt.",
          "parameters": {"type": "object", "additionalProperties": False, "properties": {
-             "observation_id": {"type": "string", "description": "ID from the latest observation, including the fresh observation returned by computer_act; single use."},
+             "observation_id": {"type": "string", "description": "Single-use ID from the latest observation in this user turn, including the fresh observation returned by computer_act. Old turns' IDs are invalid."},
              "action": {"type": "array", "minItems": 1, "maxItems": 5, "items": action_schema,
                         "description": "Put every input in this array. One item sends one input; 2–5 items send a predictable sequence grounded in the latest observation. Five is a ceiling, not a target. Stop when a step changes the screen or the next input depends on a result that is not visible yet. Multi-step sequences may contain keys, at most one single-line type step, and at most one opening click first. Safe same-window text patterns from active/exact-window observations run in one Dotool stream; other sequences keep per-step target checks. Do not batch actions that depend on an unseen menu or overlay. Keep navigation/submission last; inspect its returned observation before acting again."},
              "expected_result": {"type": "string", "minLength": 1, "maxLength": 300,
@@ -798,7 +799,6 @@ class ComputerSession:
     def wait(self, args: dict[str, Any]) -> ComputerResult:
         if not isinstance(args, dict) or set(args) - {"observation_id", "expect", "timeout_ms", "image"}:
             raise ValueError("Invalid computer_wait arguments.")
-        snapshot = self._require_snapshot(args.get("observation_id"))
         self._expect(args.get("expect"))
         timeout_ms = args.get("timeout_ms", 5000)
         if type(timeout_ms) is not int or not 0 <= timeout_ms <= 10000:
@@ -806,6 +806,11 @@ class ComputerSession:
         image_requested = args.get("image", True)
         if type(image_requested) is not bool:
             raise ValueError("image must be true or false.")
+        if (self.current is None or args.get("observation_id") != self.current["id"]
+                or self.current["used"]):
+            return self._recover_observation("stale_observation_id", wait=True,
+                                             requested_observation_id=args.get("observation_id"))
+        snapshot = self._require_snapshot(args.get("observation_id"))
         wait_id = uuid.uuid4().hex[:12]
         snapshot["used"] = True
         if self.trace:
@@ -850,9 +855,32 @@ class ComputerSession:
     def _require_snapshot(self, observation_id: Any) -> dict:
         snapshot = self.current
         if not snapshot or observation_id != snapshot["id"] or snapshot["used"]:
-            raise ValueError("The observation is missing, stale, or already used. Observe again before input.")
+            raise ValueError("The observation is missing, stale, or already used. IDs from earlier turns expire; observe again before input.")
         self._check_cancel()
         return snapshot
+
+    def _recover_observation(self, reason: str, *, action: Any = None,
+                             wait: bool = False, requested_observation_id: Any = None) -> ComputerResult:
+        values = action
+        if isinstance(values, dict):
+            values = [values]
+        focus_only = (isinstance(values, list) and len(values) == 1
+                      and isinstance(values[0], dict) and values[0].get("type") == "focus_window")
+        outcome = ({"wait_outcome": {"status": "not_run", "reason": reason}}
+                   if wait else {"action_outcome": {"effect": "refused", "reason": reason,
+                                                   "message": "No input was sent; a fresh observation was captured."}})
+        observation = self._windows() if focus_only else self._desktop()
+        if self.trace and not wait:
+            self.trace.write("computer_action_result", action_id=uuid.uuid4().hex[:12],
+                             observation_id=requested_observation_id,
+                             resulting_observation_id=self.current["id"] if self.current else None,
+                             outcome=outcome["action_outcome"], dispatch_mode="recovery")
+        prefix = json.dumps({
+            **outcome,
+            "next": "Use the fresh observation below and its observation_id for the next computer call.",
+        }, ensure_ascii=False) + "\n"
+        return ComputerResult(prefix + observation.text, observation.images,
+                              prefix + (observation.history_text or observation.text))
 
     @staticmethod
     def _action(snapshot: dict, value: Any) -> dict:
@@ -1511,17 +1539,34 @@ class ComputerSession:
             "wait_for", "wait_timeout_ms", "image",
         }:
             raise ValueError("Invalid computer_act arguments.")
-        snapshot = self._require_snapshot(args.get("observation_id"))
-        actions = self._actions(snapshot, args)
-        batch_sequence = self._batchable_keyboard_sequence(snapshot, actions)
-        dispatch_mode = "single_stream" if batch_sequence else (
-            "step_checked" if len(actions) > 1 else "single_action"
-        )
+        if isinstance(args.get("action"), dict):
+            args = {**args, "action": [args["action"]]}
+        values = args.get("action")
+        if not isinstance(values, list):
+            raise ValueError("action must be an array containing 1–5 inputs, or one action object.")
+        if not 1 <= len(values) <= 5:
+            raise ValueError("action needs 1–5 grounded inputs per call.")
         expected_result = args.get("expected_result", "")
         if not isinstance(expected_result, str) or len(expected_result) > 300:
             raise ValueError("expected_result must be at most 300 characters.")
         if not expected_result.strip():
             raise ValueError("computer_act needs a concrete expected_result to compare with the fresh observation.")
+        if (self.current is None or args.get("observation_id") != self.current["id"]
+                or self.current["used"]):
+            return self._recover_observation("stale_observation_id", action=values,
+                                             requested_observation_id=args.get("observation_id"))
+        snapshot = self._require_snapshot(args.get("observation_id"))
+        if (snapshot["mode"] == "windows" and isinstance(values, list) and len(values) == 1
+                and isinstance(values[0], dict)
+                and values[0].get("type") in {"click_element", "click", "double_click", "right_click",
+                                               "scroll", "key", "type"}):
+            return self._recover_observation("windows_list_has_no_image", action=values,
+                                             requested_observation_id=args.get("observation_id"))
+        actions = self._actions(snapshot, args)
+        batch_sequence = self._batchable_keyboard_sequence(snapshot, actions)
+        dispatch_mode = "single_stream" if batch_sequence else (
+            "step_checked" if len(actions) > 1 else "single_action"
+        )
         wait_for = args.get("wait_for")
         wait_ms = args.get("wait_timeout_ms", 5000)
         image_requested = args.get("image", True)
