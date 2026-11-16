@@ -339,6 +339,7 @@ class ComputerSession:
             pid, window_id = target
             state = self._cua_call("get_window_state", {
                 "pid": pid, "window_id": window_id, "include_screenshot": False,
+                "tree_format": "both",
                 "max_elements": 500, "max_depth": 25, "timeout_ms": 1500,
             }, timeout=3)
             bounds = state.get("window_bounds")
@@ -505,6 +506,7 @@ class ComputerSession:
             request = {
                 "pid": pid, "window_id": window_id,
                 "include_screenshot": image_requested,
+                "tree_format": "both",
                 "max_elements": 500, "max_depth": 25, "timeout_ms": 4000,
             }
             if image_requested:
@@ -534,6 +536,7 @@ class ComputerSession:
             self._focus_exact_window(pid, bounds)
             state = self._cua_call("get_window_state", {
                 "pid": pid, "window_id": window_id, "include_screenshot": False,
+                "tree_format": "both",
                 "max_elements": 500, "max_depth": 25, "timeout_ms": 4000,
             }, timeout=7)
             bounds = state.get("window_bounds") if isinstance(state.get("window_bounds"), dict) else bounds
@@ -560,6 +563,9 @@ class ComputerSession:
             document_text = tree.casefold().find("document")
             if document_text >= 0:
                 tree = tree[document_text:]
+        tree_excerpt = tree[:12_000]
+        if len(tree) > 12_000 and "\n" in tree_excerpt:
+            tree_excerpt = tree_excerpt.rsplit("\n", 1)[0]
         size = (image["width"], image["height"]) if image else None
         snapshot = self._new_snapshot(
             mode="window", pid=pid, window_id=window_id, bounds=bounds,
@@ -625,7 +631,7 @@ class ComputerSession:
             "total_element_count": state.get("total_element_count"),
             **{key: state[key] for key in _ACCESSIBILITY_HEALTH if state.get(key) is not None},
             "controls": controls, "controls_omitted_count": max(0, len(elements) - len(controls)),
-            "tree_excerpt": tree[:1200],
+            "tree_excerpt": tree_excerpt,
             "note": "Control indices and image coordinates belong only to this observation_id.",
         }, ensure_ascii=False)
         snapshot["elements"] = {item["index"]: elements[item["index"]] for item in controls}
@@ -637,7 +643,7 @@ class ComputerSession:
             self.trace.write(
                 "computer_observation_detail", observation_id=snapshot["id"],
                 model_controls=controls, mapping_frames=mapping_frames,
-                tree_excerpt=tree[:1200],
+                tree_excerpt=tree_excerpt,
                 model_control_count=len(controls),
                 model_controls_omitted_count=max(0, len(elements) - len(controls)),
                 elapsed_ms=round((time.monotonic() - started) * 1000),

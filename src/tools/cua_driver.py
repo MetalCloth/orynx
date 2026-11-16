@@ -38,6 +38,7 @@ class CuaDriver(HyprlandDriver):
         self._tree = ""
         self._elements = {}
         try:
+            self._enable_atspi_bus()
             log = open(Path(self._temporary.name) / "server.log", "wb")
             try:
                 self._server = subprocess.Popen(
@@ -75,7 +76,22 @@ class CuaDriver(HyprlandDriver):
                 self._server.kill()
                 self._server.wait(timeout=3)
             self._server = None
+            # The last AT-SPI listener leaving can switch off the live bus.
+            self._enable_atspi_bus()
         self._temporary.cleanup()
+
+    def _enable_atspi_bus(self) -> None:
+        try:
+            subprocess.run(
+                [
+                    "busctl", "--user", "set-property", "org.a11y.Bus",
+                    "/org/a11y/bus", "org.a11y.Status", "IsEnabled", "b", "true",
+                ],
+                check=True, capture_output=True, timeout=3,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            if self.trace:
+                self.trace.write("atspi_bus_enable_failed", error=str(exc)[:300])
 
     def _call(
         self, name: str, args: dict, *, timeout: int = 12,
@@ -180,7 +196,7 @@ class CuaDriver(HyprlandDriver):
                     return screenshot, size
                 state = self._call("get_window_state", {
                     "pid": window["pid"], "window_id": window["window_id"],
-                    "session": self.session, "include_screenshot": False,
+                    "session": self.session, "include_screenshot": False, "tree_format": "both",
                     "max_elements": 600, "max_depth": 25, "timeout_ms": 3000,
                 }, timeout=5)
                 self._rows = state.get("elements", []) if isinstance(state.get("elements"), list) else []

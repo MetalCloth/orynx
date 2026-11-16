@@ -6,6 +6,23 @@ uses the desktop, the same trace includes the full turn from its first model req
 any web, browser, project, terminal, or MCP tools called before the first desktop action. The
 trace is generic: it records event types and IDs, not rules for a particular website or app.
 
+To inspect the full text of a fresh tree-only observation without asking the model, run this
+from the project root with the app already open:
+
+```bash
+.venv/bin/python scripts/show_computer_observation.py Discord | .venv/bin/python -m json.tool | less
+```
+
+Replace `Discord` with another app name. The script uses Oryn's `computer_observe` path with
+`image=false`, prints the same bounded JSON text that tool would send to the model, and does
+not click, focus, or capture a screenshot. It can inspect a window on a hidden workspace
+through a read-only CUA lookup. It does not show the model's conversation context or reasoning.
+The trace's 4,000-character result preview is shorter than this live output.
+Use `--tree` before the pipe to print only the tree excerpt with actual line breaks.
+Computer tool results can carry up to 40,000 characters into the current model turn;
+other tool results retain the 20,000-character cap. The script applies the same computer
+result cap to its default JSON output.
+
 When voice input is used under `computer-log.sh run`, the same JSONL file records recording
 start/stop, sample rate, selected input and host API names, audio byte count and duration,
 peak/RMS signal levels, capture-overflow status, transcription time, transcript length, and a
@@ -77,8 +94,9 @@ flowchart LR
     W --> R["Fresh observation · cause=wait_id"]
 ```
 
-The logger keeps bounded details: at most 40 Hyprland windows across workspaces, 60 actionable controls in a
-detailed observation entry, a 1,200-character accessibility excerpt, and 4,000-character
+The logger keeps bounded details: at most 40 Hyprland windows across workspaces,
+60 actionable controls in a detailed observation entry, a 12,000-character
+accessibility excerpt ending at a full line when possible, and 4,000-character
 previews for tool arguments and results. It records lengths and whether a preview was cut off.
 The live view abbreviates those records; use `--raw` when the full bounded local record is
 needed.

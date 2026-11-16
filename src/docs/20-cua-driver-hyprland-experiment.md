@@ -101,3 +101,19 @@ env CUA_DRIVER_RS_ENABLE_WAYLAND=1 cua-driver serve --socket /home/puneet/.cache
 After that, `list_windows` returned Discord and other open windows. Calling `get_window_state` with Discord's returned PID and window ID produced hundreds of controls, with `truncated: false` and a reported `walk_elapsed_ms` of 895. This reproduction isolated the failure to finding the Wayland window, not traversing Discord's AT-SPI tree. It did not establish whether the accessibility-bus setup or Discord's renderer flag can be omitted in other runs. No Rust tree-walker patch or driver upgrade was needed for this reproduction.
 
 For convenience, this Hyprland session now sets `env = CUA_DRIVER_RS_ENABLE_WAYLAND, 1` in `~/.config/hypr/hyprland/env.conf`. Reload Hyprland after changing the file. Oryn's own driver launcher also supplies the flag to its child process; the Hyprland setting covers manually launched CUA commands.
+
+## 15 November 2026: CUA Driver 0.52.0 installed
+
+The published Linux x86_64 binary for CUA Driver 0.52.0 was installed into this checkout's `.venv/bin/cua-driver`; its release asset checksum matched the checksum published on GitHub. The previous 0.32.0 binary is retained at `.venv/bin/cua-driver.0.32.0` for rollback. The installed CLI reports 0.52.0. At installation time this verified the version swap only; the Discord accessibility reproduction above had been performed on 0.32.0.
+
+## 16 November 2026: CUA Driver 0.52.0 response format
+
+CUA Driver 0.52.0 defaults `get_window_state` to a Markdown tree without the structured `elements` array. Oryn still expected that array, so a Discord observation counted 355 elements but exposed zero indexed controls. Requesting `tree_format: "both"` returned the Markdown tree and all 355 structured elements. Oryn now requests both formats for its accessibility reads. A read-only Oryn observation then exposed 60 controls (its current display cap), reported 295 omitted controls, and returned an 11,977-character tree excerpt ending at a complete line under the new 12,000-character cap. This check did not attempt a click or open a DM.
+
+## 16 November 2026: live AT-SPI bus lifecycle
+
+With at-spi2-core 2.62.1, the live `org.a11y.Status.IsEnabled` value changed from true to false when Oryn stopped its temporary CUA driver, while the saved `toolkit-accessibility` setting stayed true. Ending CUA's session alone left the bus enabled; stopping the driver process flipped it. [AT-SPI's listener tracking](https://github.com/GNOME/at-spi2-core/blob/2.62.1/bus/at-spi-bus-launcher.c) explains this: losing the last registered accessibility listener can disable the live status without changing the saved setting.
+
+Oryn now asks the session bus to enable AT-SPI before starting CUA and again after stopping it. In a live check, a new Oryn computer session changed `IsEnabled` from false to true and left it true after closing. Five separate tree-only observations of a Discord process launched with `--force-renderer-accessibility` each returned 363 elements; `IsEnabled` remained true after each driver stopped. After deliberately turning the bus off while Discord was open, the next Oryn observation restored the bus and again returned the full tree.
+
+The remaining launch-order limit was reproduced separately: Discord started while `IsEnabled=false` returned only one fallback window element after Oryn enabled the bus, including on a second fresh read. It needs an app restart to expose its controls. Oryn does not silently restart an already-open app. With the bus on but without `--force-renderer-accessibility`, this Discord build exposed only seven structural elements, so the launch flag remains necessary for its full tree. The shell's `gtk-launch` and `gio launch` commands did not leave Discord running in this test, so the full-tree checks used `/usr/bin/discord --force-renderer-accessibility`; the desktop-launch route remains unverified here.

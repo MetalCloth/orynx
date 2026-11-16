@@ -25,6 +25,7 @@ from src.tools.terminal_tool import TerminalJobManager
 
 Message = dict[str, Any]
 MAX_TOOL_RESULT_CHARS = 20_000
+MAX_COMPUTER_TOOL_RESULT_CHARS = 40_000
 
 class TurnCancelled(Exception):
     """The user stopped the active agent turn."""
@@ -552,9 +553,13 @@ def run_turn(
                     and "cancelled" not in result_lower
                     and "denied" not in result_lower
                 )
-                if len(result) > MAX_TOOL_RESULT_CHARS:
+                result_limit = (
+                    MAX_COMPUTER_TOOL_RESULT_CHARS if call.name.startswith("computer_")
+                    else MAX_TOOL_RESULT_CHARS
+                )
+                if len(result) > result_limit:
                     marker = f"\n[Tool output truncated; original result was {len(result)} characters.]"
-                    result = result[:MAX_TOOL_RESULT_CHARS - len(marker)] + marker
+                    result = result[:result_limit - len(marker)] + marker
                 completed_calls.append(call)
                 # Record each completed pair before notifying the UI, which can disconnect.
                 if len(completed_calls) == 1:
