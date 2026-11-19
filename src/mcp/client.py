@@ -18,7 +18,7 @@ import httpx2
 
 from src.mcp.adapter import provider_tool, provider_tool_name, result_text
 from src.mcp.discovery import MCPServerConfig, PLAYWRIGHT_SERVERS, SERVER_NAMES, server_configs
-from src.mcp.playwright_bridge import ensure_playwright_bridge, stop_playwright_bridge
+from src.mcp.playwright_bridge import BRIDGE_URL, bridge_headers, ensure_playwright_bridge, stop_playwright_bridge
 from src.providers.types import retry_after_seconds
 
 
@@ -454,7 +454,10 @@ class MCPClient:
             return f"{config.name}: not connected; {message}"
         try:
             if config.name in PLAYWRIGHT_SERVERS and config.url:
+                if config.url != BRIDGE_URL:
+                    raise RuntimeError("Playwright must use Oryn's local bridge endpoint.")
                 ensure_playwright_bridge()
+                config = replace(config, headers=bridge_headers())
             count = await self._connect_one(client_type, parameters_type, config, command)
         except Exception as exc:
             while isinstance(exc, BaseExceptionGroup) and exc.exceptions:

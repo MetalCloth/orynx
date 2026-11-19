@@ -155,7 +155,7 @@ These are the exact presets in this source snapshot. Endpoints and server-advert
 
 GitHub and Context7 originally belonged to the first locally launched MCP set. Their current presets are hosted. Playwright is the local browser path and attaches to Brave only when its current DevTools endpoint is available; it does not fall back to launching a separate browser. Firecrawl remains a separate remote browser.
 
-Oryn starts the Playwright MCP through one systemd user service. It reads Brave's current `DevToolsActivePort` file and passes its WebSocket endpoint to the pinned Playwright MCP release. If the endpoint is missing or malformed, startup fails rather than opening an isolated browser. The HTTP service binds to `127.0.0.1:8931` and has no authentication; other local processes can reach it while enabled.
+Oryn starts the Playwright MCP through one systemd user service. It reads Brave's current `DevToolsActivePort` file and passes its WebSocket endpoint to the pinned Playwright MCP release. If the endpoint is missing or malformed, startup fails rather than opening an isolated browser. The HTTP service binds to `127.0.0.1:8931` and requires a random bearer token stored in the owner-only `~/.mini-hermes/playwright-bridge-token` file. Oryn sends it in an Authorization header. Requests without it receive HTTP 401; browser-origin requests receive no access.
 
 The HTTP service is separate from Oryn, so it remains running when Oryn exits. A service-owned anchor MCP client keeps the shared CDP browser attached between Oryn sessions. If Brave restarts and its endpoint changes, Oryn replaces the service once and Brave may ask for approval again. Disabling Playwright in Oryn stops the service and its anchor.
 

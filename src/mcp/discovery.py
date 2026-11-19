@@ -133,7 +133,7 @@ def server_configs(enabled_servers: set[str] | None = None) -> list[MCPServerCon
             enabled="playwright" in enabled,
             access=("Playwright MCP controls for the user's existing Brave session through one persistent, "
                     "loopback-only HTTP service. Uses accessibility snapshots and fresh element references. "
-                    "Brave approval is still needed for a new browser connection; the unauthenticated local "
-                    "service is reachable by other processes on this machine while enabled."),
+                    "Brave approval is still needed for a new browser connection. The local service requires "
+                    "an owner-only bearer token; programs running as your Linux user can read it."),
         ),
     ]

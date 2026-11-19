@@ -18,7 +18,7 @@ If Brave's endpoint is missing or its TCP listener is unavailable, Oryn refuses 
 
 Brave's **Allow remote debugging?** dialog grants broad access to the browser session. It is still per browser-debugging connection; the persistent anchor is intended to keep that connection open across Oryn restarts. Normal Oryn exit does not stop this service. Turning Playwright off in Oryn stops it. The service makes one read-only tab-list request when it starts to establish the shared browser session, then holds that client open; it does not navigate or change a page.
 
-The HTTP MCP endpoint has no authentication. It binds only to loopback, so it is not exposed to the LAN, but other programs running as the user can call its browser tools while the service is enabled. The HTTP `connected` status means Oryn reached this MCP service; the service's first browser operation may still trigger Brave's approval dialog. Inspect or stop the service with:
+The HTTP MCP endpoint binds only to loopback and requires a random token in the Authorization header. The token is stored in `~/.mini-hermes/playwright-bridge-token` with mode 0600, reused across Oryn restarts, rotated when the service is replaced, and removed when disabled. Missing or wrong tokens receive HTTP 401; browser Origin headers are rejected. Programs running as the same Linux user can read the token, so this is not isolation from your own account. The HTTP `connected` status means Oryn reached this MCP service; the service's first browser operation may still trigger Brave's approval dialog. Inspect or stop the service with:
 
 ```bash
 systemctl --user status oryn-playwright-bridge.service
@@ -38,3 +38,7 @@ systemctl --user stop oryn-playwright-bridge.service
 ## Validation status
 
 Validation covers endpoint parsing, service reuse across Oryn restarts, one-time replacement after Brave restarts, refusing unknown listeners, and the HTTP route. Live checks confirmed that Oryn loaded Playwright tools after restarting, read tab and DOM data from the existing Brave profile, and that the service's anchor kept the Brave CDP socket established while Oryn connected. The browser snapshot exposed the Chrome remote-debugging page's checked setting and loopback listener; the Netflix snapshot was sparse. No page settings were changed.
+
+The first reconnect after installing authentication replaces the older unprotected service once. This can trigger one new Brave consent prompt. Normal Oryn reconnects then reuse the authenticated service.
+
+Authentication validation confirmed HTTP 401 for missing/wrong tokens, HTTP 403 for browser Origin headers, and successful MCP discovery of 22 tools with the token. The replacement connection's tab-read attempt timed out while opening Brave's debugging WebSocket; a browser read after this authentication upgrade remains unconfirmed. The anchor now rejects the adapter's `MCP server reported a tool error:` prefix as failure instead of logging a false connection success. It does not retry automatically.

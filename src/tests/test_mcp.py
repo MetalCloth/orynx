@@ -42,7 +42,7 @@ class MCPTests(unittest.TestCase):
         self.assertEqual(PLAYWRIGHT_MCP_VERSION, "0.0.85")
         self.assertEqual(local.args, ())
         self.assertIn("existing Brave session", local.access)
-        self.assertIn("other processes on this machine", local.access)
+        self.assertIn("token", local.access)
         self.assertNotIn("browser_use_local", SERVER_NAMES)
         self.assertEqual(local.disabled_reason, "")
         self.assertIn("enable debugging", unavailable.disabled_reason)
@@ -85,7 +85,8 @@ class MCPTests(unittest.TestCase):
     def test_playwright_bridge_reuses_the_existing_service_for_the_same_brave_session(self):
         from src.mcp.playwright_bridge import BRIDGE_URL, ensure_playwright_bridge
 
-        with patch("src.mcp.playwright_bridge._active", return_value=True), \
+        with patch("src.mcp.playwright_bridge._authenticated", return_value=True), \
+             patch("src.mcp.playwright_bridge._active", return_value=True), \
              patch("src.mcp.playwright_bridge._stored_endpoint", return_value="ws://127.0.0.1:9222/devtools/browser/a"), \
              patch("src.mcp.playwright_bridge._port_accepting", return_value=True), \
              patch("src.mcp.playwright_bridge._start_service") as start, \
@@ -99,7 +100,8 @@ class MCPTests(unittest.TestCase):
         from src.mcp.playwright_bridge import BRIDGE_URL, ensure_playwright_bridge
 
         endpoint = "ws://127.0.0.1:9222/devtools/browser/a"
-        with patch("src.mcp.playwright_bridge._active", side_effect=[False, True]), \
+        with patch("src.mcp.playwright_bridge._authenticated", return_value=True), \
+             patch("src.mcp.playwright_bridge._active", side_effect=[False, True]), \
              patch("src.mcp.playwright_bridge._stored_endpoint", return_value=endpoint), \
              patch("src.mcp.playwright_bridge._port_accepting", side_effect=[True, False, True]), \
              patch("src.mcp.playwright_bridge._start_service") as start, \
@@ -113,7 +115,8 @@ class MCPTests(unittest.TestCase):
 
         old = "ws://127.0.0.1:9222/devtools/browser/a"
         new = "ws://127.0.0.1:9333/devtools/browser/b"
-        with patch("src.mcp.playwright_bridge._active", side_effect=[True, True]), \
+        with patch("src.mcp.playwright_bridge._authenticated", return_value=True), \
+             patch("src.mcp.playwright_bridge._active", side_effect=[True, True]), \
              patch("src.mcp.playwright_bridge._stored_endpoint", side_effect=[old, new]), \
              patch("src.mcp.playwright_bridge._port_accepting", return_value=True), \
              patch("src.mcp.playwright_bridge._start_service") as start, \
@@ -148,6 +151,7 @@ class MCPTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             endpoint_file = Path(folder) / "playwright-bridge-endpoint"
             with patch("src.mcp.playwright_bridge._STATE_PATH", endpoint_file), \
+                 patch("src.mcp.playwright_bridge._TOKEN_PATH", Path(folder) / "token"), \
                  patch("src.mcp.playwright_bridge.shutil.which", return_value="/usr/bin/systemd-run"), \
                  patch("src.mcp.playwright_bridge.subprocess.run", return_value=SimpleNamespace(
                      returncode=0, stderr="", stdout="",
@@ -181,11 +185,13 @@ class MCPTests(unittest.TestCase):
 
         anchor = Mock()
         anchor.diagnostic_snapshot.return_value = {"connected_count": 1}
-        anchor.call_tool.return_value = "### Error\nCDP connection failed"
-        with patch("src.mcp.client.MCPClient", return_value=anchor):
-            with self.assertRaisesRegex(RuntimeError, "tab check failed"):
-                _connect_anchor(threading.Event())
-        anchor.close.assert_called_once_with()
+        for result in ("### Error\nCDP connection failed", "MCP server reported a tool error:\n### Error\nTimeout"):
+            anchor.reset_mock()
+            anchor.call_tool.return_value = result
+            with patch("src.mcp.client.MCPClient", return_value=anchor):
+                with self.assertRaisesRegex(RuntimeError, "tab check failed"):
+                    _connect_anchor(threading.Event())
+            anchor.close.assert_called_once_with()
 
     def test_disabling_playwright_stops_the_persistent_service(self):
         client = MCPClient([MCPServerConfig("playwright", url="http://127.0.0.1:8931/mcp", enabled=False)])

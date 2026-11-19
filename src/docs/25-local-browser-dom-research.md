@@ -18,7 +18,7 @@ Both tools can connect to a logged-in Chromium browser over CDP. Both need Brave
 
 The Playwright MCP server is managed by [the persistent bridge](../mcp/playwright_bridge.py) and [Brave endpoint launcher](../mcp/playwright_brave.py). It reads Brave's current `DevToolsActivePort` and passes its loopback WebSocket endpoint to a pinned `@playwright/mcp` release. Reading the WebSocket path avoids relying on `/json/version`, which this Brave currently answers with HTTP 404.
 
-The launcher fails closed if the endpoint is absent or malformed. It must not start an isolated, headless, or temporary browser. One user-level systemd service provides an HTTP MCP endpoint on loopback and holds an anchor MCP client so its shared CDP browser remains attached across Oryn restarts. Oryn reuses it for the same Brave endpoint; if Brave restarts and changes that endpoint, Oryn replaces the service once and Brave may ask for approval again. The HTTP service has no authentication, so other local processes can reach it while it is enabled. It is not reachable over the LAN.
+The launcher fails closed if the endpoint is absent or malformed. It must not start an isolated, headless, or temporary browser. One user-level systemd service provides an HTTP MCP endpoint on loopback and holds an anchor MCP client so its shared CDP browser remains attached across Oryn restarts. Oryn reuses it for the same Brave endpoint; if Brave restarts and changes that endpoint, Oryn replaces the service once and Brave may ask for approval again. The HTTP service requires an owner-only bearer token and rejects requests with browser Origin headers. It is not reachable over the LAN. Programs running as the same Linux user can still read its credential.
 
 ## Oryn integration boundaries
 

@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import os
+import http.client
+import secrets
+import stat
+import tempfile
 from pathlib import Path
 import shutil
 import socket
@@ -23,7 +27,46 @@ from src.mcp.playwright_brave import (
 BRIDGE_UNIT = "oryn-playwright-bridge.service"
 BRIDGE_URL = f"http://{PLAYWRIGHT_BRIDGE_HOST}:{PLAYWRIGHT_BRIDGE_PORT}/mcp"
 _STATE_PATH = PLAYWRIGHT_BRIDGE_ENDPOINT_FILE
+_TOKEN_PATH = PLAYWRIGHT_BRIDGE_ENDPOINT_FILE.with_name("playwright-bridge-token")
 _LOCK = threading.Lock()
+
+
+def bridge_headers() -> dict[str, str]:
+    """Read the owner-only credential without exposing it in URLs or arguments."""
+    info = _TOKEN_PATH.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise RuntimeError("Playwright bridge token must be an owner-only regular file.")
+    token = _TOKEN_PATH.read_text(encoding="ascii").strip()
+    if len(token) != 64 or any(char not in "0123456789abcdef" for char in token):
+        raise RuntimeError("Playwright bridge token is invalid; reconnect Playwright.")
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _authenticated() -> bool:
+    try:
+        for headers, expected_denial in (({}, True), (bridge_headers(), False)):
+            connection = http.client.HTTPConnection(PLAYWRIGHT_BRIDGE_HOST, PLAYWRIGHT_BRIDGE_PORT, timeout=1)
+            try:
+                connection.request("GET", "/mcp", headers=headers)
+                status = connection.getresponse().status
+                if (status == 401) != expected_denial or status == 403:
+                    return False
+            finally:
+                connection.close()
+        return True
+    except (OSError, RuntimeError, http.client.HTTPException):
+        return False
+
+
+def _write_token() -> None:
+    _TOKEN_PATH.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=_TOKEN_PATH.parent, prefix=".playwright-token-")
+    try:
+        with os.fdopen(fd, "w", encoding="ascii") as handle:
+            handle.write(secrets.token_hex(32) + "\n")
+        os.replace(temporary, _TOKEN_PATH)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 def _run_systemctl(*args: str) -> subprocess.CompletedProcess[str]:
@@ -73,6 +116,7 @@ def _stop_service() -> None:
             detail = result.stderr.strip() or result.stdout.strip() or "unknown systemd error"
             raise RuntimeError(f"Could not stop the persistent Playwright service: {detail[:200]}")
     _STATE_PATH.unlink(missing_ok=True)
+    _TOKEN_PATH.unlink(missing_ok=True)
 
 
 def _start_service(endpoint: str) -> None:
@@ -94,9 +138,11 @@ def _start_service(endpoint: str) -> None:
     command.extend(f"--setenv={key}={value}" for key, value in env.items())
     command.extend(("--", sys.executable, str(script), "--serve-http"))
     _write_endpoint(endpoint)
+    _write_token()
     result = subprocess.run(command, capture_output=True, text=True, timeout=15, check=False)
     if result.returncode:
         _STATE_PATH.unlink(missing_ok=True)
+        _TOKEN_PATH.unlink(missing_ok=True)
         detail = result.stderr.strip() or result.stdout.strip() or "unknown systemd error"
         raise RuntimeError(f"Could not start the persistent Playwright service: {detail[:240]}")
 
@@ -112,7 +158,7 @@ def ensure_playwright_bridge(endpoint: str | None = None) -> str:
     with _LOCK:
         active = _active()
         same_session = _stored_endpoint() == endpoint
-        if active and same_session and _port_accepting(PLAYWRIGHT_BRIDGE_HOST, PLAYWRIGHT_BRIDGE_PORT):
+        if active and same_session and _authenticated():
             return BRIDGE_URL
         if active:
             # This is a single deliberate replacement, e.g. after Brave restarted. No retry loop.
@@ -125,7 +171,7 @@ def ensure_playwright_bridge(endpoint: str | None = None) -> str:
         _start_service(endpoint)
         deadline = time.monotonic() + 12
         while time.monotonic() < deadline:
-            if _port_accepting(PLAYWRIGHT_BRIDGE_HOST, PLAYWRIGHT_BRIDGE_PORT):
+            if _authenticated():
                 if _stored_endpoint() == endpoint:
                     return BRIDGE_URL
             if not _active():

@@ -46,7 +46,7 @@ def _connect_anchor(stop: threading.Event):
         result = anchor.call_tool(
             "mcp__playwright__browser_tabs", {"action": "list"}, cancel_event=stop,
         )
-        if result.lstrip().startswith(("### Error", "Tool error:")):
+        if result.lstrip().startswith(("### Error", "Tool error:", "MCP server reported a tool error:")):
             raise RuntimeError("the initial read-only browser tab check failed")
         return anchor
     except Exception:

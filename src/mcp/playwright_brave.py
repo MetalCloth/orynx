@@ -74,6 +74,10 @@ def main() -> int:
             "--host", PLAYWRIGHT_BRIDGE_HOST, "--port", str(PLAYWRIGHT_BRIDGE_PORT),
             "--shared-browser-context",
         ))
+        # Preload the gate in the pinned CLI itself, leaving no unprotected backend port.
+        gate = Path(__file__).with_name("playwright_http_auth.cjs")
+        env["NODE_OPTIONS"] = f'--require="{gate}"'
+        env["ORYN_PLAYWRIGHT_TOKEN_FILE"] = str(PLAYWRIGHT_BRIDGE_ENDPOINT_FILE.with_name("playwright-bridge-token"))
     os.execvpe(npx, command, env)
     return 0
 

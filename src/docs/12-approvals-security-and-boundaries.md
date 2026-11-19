@@ -56,7 +56,7 @@ Native Firecrawl browser actions and local desktop input both run without per-ac
 
 Annotations come from servers and are not a complete side-effect proof. Even a read can reveal private account data or incur service usage. The current policy is explicit and small; a general policy engine is not implemented in the empty security modules.
 
-The persistent Playwright MCP HTTP endpoint binds only to `127.0.0.1`, but has no authentication. Other processes on the same machine can invoke it while Playwright is enabled. Disabling Playwright stops the service.
+The persistent Playwright MCP HTTP endpoint binds only to `127.0.0.1` and requires a random bearer token. The token file is created with mode 0600 and removed when Playwright is disabled; token values never appear in URLs or process arguments. A Node preload gate checks requests before Playwright handles them and rejects browser Origin headers. There is no second unprotected backend port. This protects against callers without the token, including other users; programs running as the same Linux user can read the credential and are outside this boundary. Disabling Playwright stops the service.
 
 ## 4. Approval lifecycle in the dashboard
 
