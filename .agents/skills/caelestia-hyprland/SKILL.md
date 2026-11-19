@@ -1,11 +1,11 @@
 ---
 name: caelestia-hyprland
-description: Use for Oryn local-desktop tasks on the user's Caelestia-style Hyprland desktop, especially launcher, app, workspace, and window shortcuts.
+description: Load for Caelestia launcher, workspace, or custom desktop shortcuts. Ordinary browser/app shortcuts and focusing a window listed by computer_observe do not require this guide.
 ---
 
 # Caelestia Hyprland desktop profile
 
-Use this profile when planning desktop actions for this user. It is based on the public Caelestia dotfiles and shell READMEs because the user says their laptop uses the same design. These are upstream documented defaults, not a live read of the user's config. Screenshots and explicit user corrections override the profile. Apps and keybinds may be customized in `hypr-vars.lua` and `hypr-user.lua`.
+Use this profile when a task needs this user's Caelestia launcher, workspace, or custom desktop shortcuts. Ordinary in-app shortcuts such as Brave's Ctrl+T or Ctrl+L, and focus_window from a computer_observe window list, are covered by the built-in computer tools. It is based on the public Caelestia dotfiles and shell READMEs because the user says their laptop uses the same design. These are upstream documented defaults, not a live read of the user's config. Screenshots and explicit user corrections override the profile. Apps and keybinds may be customized in `hypr-vars.lua` and `hypr-user.lua`.
 
 Sources:
 - https://github.com/caelestia-dots/caelestia#default-keybinds

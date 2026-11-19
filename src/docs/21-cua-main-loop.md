@@ -151,6 +151,25 @@ Validation passed all **259 regression tests**, including catalog selection, exp
 
 Trials ran baseline → updated → updated → baseline. The baseline already skipped the guide in both trials; its sixth request was an additional observation. This checks continued task correctness but does **not** establish a speedup caused by removing the guide. The deterministic regression proves its routine catalog omission; real TUI performance and other model routing choices still need user-run observation. The temporary comparison script and output are `/tmp/oryn_skill_comparison.py` and `/tmp/oryn_skill_comparison.jsonl` on the development machine.
 
+### Hyprland guide selection
+
+The next real Brave log, `computer-20261119T131426Z-156780.jsonl`, contains two attempts. The first (`95c4c5743e22`, `gpt-5.6-luna`) loaded `caelestia-hyprland` before any desktop observation, then was cancelled after 6.516 seconds. Its completed model response took 3.258 seconds and the load itself took 30 ms; the cancelled second request accounts for additional time. The continuation (`0a586a9ffe02`, `gpt-6-luna`) used four model requests in 20.211 seconds: list windows, focus Brave, send Ctrl+T/type URL/Enter, and answer. It used no Caelestia-specific key binding. The model changed and the guide was already in conversation history, so this is not an isolated speed comparison.
+
+The profile previously advertised itself for local desktop tasks generally. Its description and opening paragraph now scope it to Caelestia launcher, workspace, or custom desktop shortcuts. They clarify that ordinary in-app shortcuts and `focus_window` from a window list are already covered by the built-in tools. The skill remains in the catalog and can still be explicitly requested. Its shortcut mappings, loader, tool schemas, and execution checks are unchanged. This adjusts the model's selection guidance; it does not prohibit a load or guarantee a particular model route.
+
+Validation passed the 24 skill-loading and conversation-loop regression tests. A catalog check confirmed that the 175-character description reaches `load_skill`, the guide remains in its enum, and exact-name loading still returns its complete instructions. The change introduces no runtime logic, so the unchanged full suite was not rerun for this wording-only update.
+
+Eight controlled model trials used default provider settings, the three project skills, computer tools, and the synthetic accessibility-only Brave fixture. Each model received one baseline and one updated browser task, followed by updated implicit and explicit shortcut questions. There was no real desktop input.
+
+| Task | `gpt-5.6-luna` | `gpt-6-luna` |
+| --- | --- | --- |
+| Browser, baseline profile | 5 model requests, no guide load, correct final state | 5 requests, no guide load, correct final state |
+| Browser, updated profile | 4 requests, no guide load, correct final state | 5 requests, no guide load, correct final state |
+| Ask for the user's custom Brave shortcut | Loaded guide, answered Super+W, 2 requests | Loaded guide, answered Super+W, 3 requests, one extra observation |
+| Explicitly load guide and ask for launcher key | Loaded guide, answered Super, 2 requests | Loaded guide, answered Super, 2 requests |
+
+All eight trials selected the intended guide route and returned the expected task result. Seven also met the stricter efficiency criterion; the `gpt-6-luna` implicit shortcut question made an unnecessary `computer_observe` call. That remains a separate routing concern. Neither baseline browser trial loaded the guide, so these runs do not establish a reduction in redundant loading or a speedup attributable to the wording. The temporary test script and results are `/tmp/oryn-hyprland-guide/comparison.py` and `/tmp/oryn-hyprland-guide/comparison.jsonl` on the development machine.
+
 ## Observation lifetime validation
 
 The bounded retention change keeps one screen snapshot (tree and optional image) and one window-list snapshot in `ComputerSession`; `current` remains the latest produced result for trace/capture bookkeeping. `ComputerResult.observation_scope` lets the conversation loop retain the corresponding two detailed tool results without parsing their text. Task notes, skill loading, and observations of the other kind preserve these results. An action, native wait, or stale-ID recovery clears both old runtime references; closing the desktop session clears any remaining references. Detailed results are removed from stored conversation history on turn exit, including failure or cancellation.
