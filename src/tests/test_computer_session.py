@@ -98,6 +98,7 @@ class ComputerActionBatchTests(unittest.TestCase):
     @staticmethod
     def _session():
         session = ComputerSession.__new__(ComputerSession)
+        session._observations = {}
         session.cancel_event = threading.Event()
         session.current = {
             "id": "current", "captured_at": 0, "used": False,
@@ -105,6 +106,7 @@ class ComputerActionBatchTests(unittest.TestCase):
             "bounds": {"x": 0, "y": 0, "width": 800, "height": 450},
             "size": (800, 450), "image_scope": "window", "elements": {},
         }
+        session._observations["screen"] = session.current
         session.dry_run = False
         session.dry_run_used = False
         session.trace = None
@@ -167,6 +169,7 @@ class ComputerAccessibilityObservationTests(unittest.TestCase):
     @staticmethod
     def _session(path, stamp):
         session = ComputerSession.__new__(ComputerSession)
+        session._observations = {}
         session.cancel_event = threading.Event()
         session.cua = True
         session.trace = None
@@ -289,6 +292,7 @@ class ComputerElementCoordinateTests(unittest.TestCase):
     @staticmethod
     def _session():
         session = ComputerSession.__new__(ComputerSession)
+        session._observations = {}
         session.driver = SimpleNamespace(
             monitor_rect=(0.0, 0.0, 1920.0, 1080.0), width=1920, height=1080,
         )
@@ -493,10 +497,96 @@ class ComputerPreflightTests(unittest.TestCase):
 
 
 class ComputerActionRecoveryTests(unittest.TestCase):
+    def test_window_lookup_preserves_screen_and_marks_list_result(self):
+        session = self._session()
+        session.cua = False
+        screen = session._new_snapshot(mode="desktop")
+        with patch.object(session, "_hyprland_clients", return_value=[]):
+            result = session._windows()
+        self.assertEqual(result.observation_scope, "windows")
+        self.assertIs(session._require_snapshot(screen["id"]), screen)
+        self.assertEqual(session._require_snapshot(json.loads(result.text)["observation_id"])["mode"], "windows")
+
+    def test_focus_from_retained_list_after_screen_read_and_close_expires_refs(self):
+        session = self._session()
+        session.cua = False
+        windows = session._new_snapshot(mode="windows", windows={1: {"pid": 123}})
+        screen = session._new_snapshot(mode="desktop")
+        fresh = ComputerResult('{"scope":"window"}', observation_scope="screen")
+        with (patch.object(session, "_focus_window", return_value={"effect": "confirmed"}) as focus,
+              patch.object(session, "_fresh_after", return_value=(fresh, None))):
+            result = session.act({"observation_id": windows["id"],
+                                  "action": [{"type": "focus_window", "window_index": 1}],
+                                  "expected_result": "Existing app focused"})
+        focus.assert_called_once_with(windows, {"type": "focus_window", "window_index": 1})
+        self.assertEqual(result.observation_scope, "screen")
+        for old in (windows, screen):
+            with self.assertRaises(ValueError):
+                session._require_snapshot(old["id"])
+        last = session._new_snapshot(mode="desktop")
+        session.close()
+        with self.assertRaises(ValueError):
+            session._require_snapshot(last["id"])
+
+    def test_reads_keep_latest_screen_and_latest_windows_independently(self):
+        session = self._session()
+        screen = session._new_snapshot(mode="desktop")
+        windows = session._new_snapshot(mode="windows")
+        self.assertIs(session._require_snapshot(screen["id"]), screen)
+        newer = session._new_snapshot(mode="desktop")
+        self.assertIs(session._require_snapshot(windows["id"]), windows)
+        self.assertIs(session._require_snapshot(newer["id"]), newer)
+        with self.assertRaises(ValueError):
+            session._require_snapshot(screen["id"])
+        newest_list = session._new_snapshot(mode="windows")
+        with self.assertRaises(ValueError):
+            session._require_snapshot(windows["id"])
+        self.assertIs(session._require_snapshot(newer["id"]), newer)
+        self.assertIs(session._require_snapshot(newest_list["id"]), newest_list)
+
+    def test_screen_key_after_window_lookup_checks_focus_and_invalidates_both_ids(self):
+        for focus in ("before", "changed"):
+            with self.subTest(focus=focus):
+                session = self._session()
+                screen = session._new_snapshot(mode="desktop", stamp="before")
+                windows = session._new_snapshot(mode="windows")
+                session.driver = SimpleNamespace(active_window_stamp=Mock(return_value=focus))
+                fresh = ComputerResult('{"scope":"desktop"}')
+                with (patch.object(session, "_fresh_after", return_value=(fresh, None)),
+                      patch.object(HyprlandDriver, "execute") as send):
+                    result = session.act({"observation_id": screen["id"],
+                                          "action": [{"type": "key", "key": "leftmeta"}],
+                                          "expected_result": "Launcher visible"})
+                outcome = json.loads(result.text.splitlines()[0])["action_outcome"]
+                if focus == "before":
+                    self.assertEqual(outcome["effect"], "sent")
+                    send.assert_called_once()
+                else:
+                    self.assertEqual(outcome["reason"], "active_window_changed")
+                    send.assert_not_called()
+                for old in (screen, windows):
+                    with self.assertRaises(ValueError):
+                        session._require_snapshot(old["id"])
+
+    def test_native_wait_consumes_retained_screen_and_window_ids(self):
+        session = self._session()
+        screen = session._new_snapshot(mode="window", pid=123, window_id=42)
+        windows = session._new_snapshot(mode="windows")
+        with (patch.object(session, "_verify", return_value={"status": "satisfied"}) as verify,
+              patch.object(session, "_fresh_after", return_value=(ComputerResult("{}"), None))):
+            session.wait({"observation_id": screen["id"], "expect": {"window": {"exists": True}}})
+        verify.assert_called_once()
+        for old in (screen, windows):
+            with self.assertRaises(ValueError):
+                session._require_snapshot(old["id"])
+
     @staticmethod
     def _session(snapshot=None, *, dry_run=False):
         session = ComputerSession.__new__(ComputerSession)
+        session._observations = {}
         session.current = snapshot
+        if snapshot is not None:
+            session._observations["windows" if snapshot["mode"] == "windows" else "screen"] = snapshot
         session.cancel_event = threading.Event()
         session.dry_run = dry_run
         session.dry_run_used = False

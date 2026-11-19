@@ -140,6 +140,7 @@ def run_turn(
     timer.start()
     tool_count = 0
     computer_history: dict[str, str] = {}
+    computer_views: dict[str, str] = {}
     model_requests = 0
     turn_id = uuid.uuid4().hex
     turn_started = time.monotonic()
@@ -152,13 +153,18 @@ def run_turn(
                 # Diagnostics must never break a user turn.
                 pass
 
-    def retire_computer_observations() -> None:
+    def retire_computer_observations(keep: frozenset[str] = frozenset()) -> None:
         for message in messages:
             if message.get("role") == "tool" and message.get("name", "").startswith("computer_"):
+                if message.get("tool_call_id") in keep:
+                    continue
                 message.pop("images", None)
                 summary_text = computer_history.pop(message.get("tool_call_id"), None)
                 if summary_text is not None:
                     message["content"] = summary_text
+        for scope, call_id in list(computer_views.items()):
+            if call_id not in keep:
+                del computer_views[scope]
 
     summary, covered_messages, covered_digest = "", 0, ""
     model_name = getattr(getattr(complete, "__self__", None), "model", "unknown")
@@ -345,9 +351,10 @@ def run_turn(
                 break
             check_cancelled()
             if computer_session is not None and (
-                not response.tool_calls or any(call.name != "computer_task" for call in response.tool_calls)
+                not response.tool_calls or any(call.name not in {"computer_task", "load_skill", "computer_observe"}
+                                              for call in response.tool_calls)
             ):
-                # Notes do not consume the observation; other tools and final answers retire it.
+                # Reads retain each source; input and final answers retire both.
                 retire_computer_observations()
             if not response.tool_calls:
                 diagnostic(
@@ -550,6 +557,7 @@ def run_turn(
                     result = f"Tool error: {exc}. Correct the arguments or try another approach."
                 result_images = result.images if isinstance(result, ComputerResult) else []
                 history_text = result.history_text if isinstance(result, ComputerResult) else None
+                observation_scope = result.observation_scope if isinstance(result, ComputerResult) else None
                 result = result.text if isinstance(result, ComputerResult) else result
                 result_lower = result.casefold()
                 tool_succeeded = (
@@ -573,7 +581,8 @@ def run_turn(
                     "id": call.id, "name": call.name, "arguments": call.arguments,
                 })
                 if result_images or history_text is not None:
-                    retire_computer_observations()
+                    computer_views[observation_scope or "screen"] = call.id
+                    retire_computer_observations(frozenset(computer_views.values()))
                 tool_message = {
                     "role": "tool", "tool_call_id": call.id,
                     "name": call.name, "content": result,

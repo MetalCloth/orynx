@@ -15,6 +15,47 @@ from src.tools.computer_session import ComputerResult
 
 
 class ConversationLoopTests(unittest.TestCase):
+    def test_screen_and_windows_survive_skill_loading_and_replace_only_same_source(self):
+        for first in ("screen", "windows"):
+            with self.subTest(first=first), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                skill = root / ".agents" / "skills" / "launcher"
+                skill.mkdir(parents=True)
+                (skill / "SKILL.md").write_text(
+                    "---\nname: launcher\ndescription: Local launcher keys.\n---\nTap leftmeta to open the launcher.\n",
+                )
+                second = "windows" if first == "screen" else "screen"
+                session = Mock()
+                session.goal = ""
+                session.execute.side_effect = [
+                    ComputerResult("FIRST", [self._screen_image()] if first == "screen" else [], "FIRST_SUMMARY", first),
+                    ComputerResult("SECOND", [self._screen_image()] if second == "screen" else [], "SECOND_SUMMARY", second),
+                    ComputerResult("REPLACEMENT", [], "REPLACEMENT_SUMMARY", first),
+                ]
+                responses = iter([
+                    ModelResponse(tool_calls=[ToolCall("first", "computer_observe", {"mode": "desktop" if first == "screen" else "windows"})]),
+                    ModelResponse(tool_calls=[ToolCall("skill", "load_skill", {"name": "launcher"})]),
+                    ModelResponse(tool_calls=[ToolCall("second", "computer_observe", {"mode": "desktop" if second == "screen" else "windows"})]),
+                    ModelResponse(tool_calls=[ToolCall("new", "computer_observe", {"mode": "desktop" if first == "screen" else "windows"})]),
+                    ModelResponse("Ready."),
+                ])
+                requests = []
+
+                def complete(messages, tools, **kwargs):
+                    requests.append([(m["content"], bool(m.get("images"))) for m in messages
+                                     if m.get("role") == "tool" and m.get("name") == "computer_observe"])
+                    return next(responses)
+
+                history = [{"role": "user", "content": "Open an app."}]
+                run_turn(history, complete, [], root, Mock(), Mock(), computer_session=session)
+                self.assertEqual(requests[1], requests[2])
+                self.assertEqual(requests[3], [("FIRST", first == "screen"), ("SECOND", second == "screen")])
+                self.assertEqual(requests[4], [("FIRST_SUMMARY", False), ("SECOND", second == "screen"), ("REPLACEMENT", False)])
+                self.assertTrue(all("images" not in m for m in history))
+                self.assertEqual([m["content"] for m in history if m.get("name") == "computer_observe"
+                                  and m.get("role") == "tool"],
+                                 ["FIRST_SUMMARY", "SECOND_SUMMARY", "REPLACEMENT_SUMMARY"])
+
     @staticmethod
     def _screen_image():
         output = BytesIO()
