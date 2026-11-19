@@ -1,15 +1,125 @@
 import tempfile
 import threading
 import unittest
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from PIL import Image
+
 from src.agent.conversation_loop import TurnCancelled, TurnLimitReached, TurnLimits, run_turn
+from src.images import prepare_image
 from src.providers.types import ModelResponse, ProviderRequestError, ToolCall
 from src.tools.registry import tool_schemas
+from src.tools.computer_session import ComputerResult
 
 
 class ConversationLoopTests(unittest.TestCase):
+    @staticmethod
+    def _screen_image():
+        output = BytesIO()
+        with Image.new("RGB", (2, 2), "white") as image:
+            image.save(output, format="PNG")
+        return prepare_image(output.getvalue())
+
+    def test_computer_observation_survives_notes_and_is_replaced_after_action(self):
+        for images in ([], [self._screen_image()]):
+            with self.subTest(images=bool(images)), tempfile.TemporaryDirectory() as folder:
+                history = [{"role": "user", "content": "Work across several apps."}]
+                session = Mock()
+                session.goal = ""
+                session.execute.side_effect = [
+                    ComputerResult("CURRENT_CONTROLS", images, "OLD_SUMMARY"),
+                    ComputerResult("NEW_CONTROLS", images, "NEW_SUMMARY"),
+                ]
+                replies = iter([
+                    ModelResponse(tool_calls=[ToolCall("see", "computer_observe", {"mode": "active"})]),
+                    ModelResponse(tool_calls=[ToolCall("start", "computer_task", {
+                        "operation": "start", "goal": "Work across apps", "environment": "local_desktop",
+                        "steps": ["Inspect app"], "done_checks": ["Work done"],
+                    })]),
+                    ModelResponse(tool_calls=[ToolCall("note", "computer_task", {
+                        "operation": "record", "next_step": "Use the visible control",
+                    })]),
+                    ModelResponse(tool_calls=[ToolCall("act", "computer_act", {
+                        "observation_id": "screen", "action": [{"type": "key", "key": "esc"}],
+                        "expected_result": "Menu closed",
+                    })]),
+                    ModelResponse("Done."),
+                ])
+                requests = []
+
+                def complete(messages, tools, **kwargs):
+                    observations = [m for m in messages if m.get("name") in {"computer_observe", "computer_act"}
+                                    and m.get("role") == "tool"]
+                    requests.append([(m["content"], bool(m.get("images"))) for m in observations])
+                    return next(replies)
+
+                run_turn(history, complete, [], Path(folder), Mock(), Mock(), computer_session=session)
+                visible = ("CURRENT_CONTROLS", bool(images))
+                self.assertEqual(requests[1:4], [[visible], [visible], [visible]])
+                self.assertEqual(requests[4], [("OLD_SUMMARY", False), ("NEW_CONTROLS", bool(images))])
+                self.assertEqual([m["content"] for m in history if m.get("role") == "tool"
+                                  and m.get("name") in {"computer_observe", "computer_act"}],
+                                 ["OLD_SUMMARY", "NEW_SUMMARY"])
+                self.assertTrue(all("images" not in m for m in history))
+                self.assertEqual(session.execute.call_count, 2)
+
+    def test_retained_computer_observation_is_cleaned_on_failure_cancellation_or_budget(self):
+        for failure in (RuntimeError("provider failed"), TurnCancelled(), None):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as folder:
+                history = [{"role": "user", "content": "Inspect several apps."}]
+                session = Mock()
+                session.goal = ""
+                session.execute.return_value = ComputerResult(
+                    "PRIVATE_CONTROLS", [self._screen_image()], "SAFE_SUMMARY",
+                )
+                responses = [
+                    ModelResponse(tool_calls=[ToolCall("see", "computer_observe", {"mode": "active"})]),
+                    ModelResponse(tool_calls=[ToolCall("note", "computer_task", {
+                        "operation": "start", "goal": "Inspect apps", "environment": "local_desktop",
+                        "steps": ["Inspect app"], "done_checks": ["App inspected"],
+                    })]),
+                ]
+                if failure is not None:
+                    responses.append(failure)
+                    expected = type(failure)
+                    limits = TurnLimits()
+                else:
+                    expected = TurnLimitReached
+                    limits = TurnLimits(max_rounds=2)
+                with self.assertRaises(expected):
+                    run_turn(history, Mock(side_effect=responses), [], Path(folder), Mock(), Mock(),
+                             computer_session=session, limits=limits)
+                observation = next(m for m in history if m.get("role") == "tool"
+                                   and m.get("name") == "computer_observe")
+                self.assertEqual(observation["content"], "SAFE_SUMMARY")
+                self.assertTrue(all("images" not in m for m in history))
+
+    def test_latest_tree_only_observation_replaces_image_in_same_response(self):
+        history = [{"role": "user", "content": "Inspect the current window."}]
+        session = Mock()
+        session.goal = ""
+        session.execute.side_effect = [
+            ComputerResult("OLD_CONTROLS", [self._screen_image()], "OLD_SUMMARY"),
+            ComputerResult("CURRENT_CONTROLS", [], "CURRENT_SUMMARY"),
+        ]
+
+        def complete(messages, tools, **kwargs):
+            observations = [m for m in messages if m.get("role") == "tool"]
+            if not observations:
+                return ModelResponse(tool_calls=[
+                    ToolCall("first", "computer_observe", {"mode": "active"}),
+                    ToolCall("second", "computer_observe", {"mode": "active", "image": False}),
+                ])
+            self.assertEqual([m["content"] for m in observations], ["OLD_SUMMARY", "CURRENT_CONTROLS"])
+            self.assertTrue(all("images" not in m for m in observations))
+            return ModelResponse("Inspected.")
+
+        with tempfile.TemporaryDirectory() as folder:
+            run_turn(history, complete, [], Path(folder), Mock(), Mock(), computer_session=session)
+        self.assertEqual(history[-1]["content"], "CURRENT_SUMMARY")
+
     def test_read_only_subagent_gets_isolated_context_and_bounded_tools(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

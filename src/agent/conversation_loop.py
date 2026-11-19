@@ -152,6 +152,14 @@ def run_turn(
                 # Diagnostics must never break a user turn.
                 pass
 
+    def retire_computer_observations() -> None:
+        for message in messages:
+            if message.get("role") == "tool" and message.get("name", "").startswith("computer_"):
+                message.pop("images", None)
+                summary_text = computer_history.pop(message.get("tool_call_id"), None)
+                if summary_text is not None:
+                    message["content"] = summary_text
+
     summary, covered_messages, covered_digest = "", 0, ""
     model_name = getattr(getattr(complete, "__self__", None), "model", "unknown")
     if not isinstance(model_name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9./_:-]{0,119}", model_name):
@@ -336,14 +344,11 @@ def run_turn(
                     on_text_delta(response.text)
                 break
             check_cancelled()
-            if computer_session is not None:
-                # Screens are for one model step only; text outcomes remain in session history.
-                for message in messages:
-                    if message.get("role") == "tool" and message.get("name", "").startswith("computer_"):
-                        message.pop("images", None)
-                        summary_text = computer_history.pop(message.get("tool_call_id"), None)
-                        if summary_text is not None:
-                            message["content"] = summary_text
+            if computer_session is not None and (
+                not response.tool_calls or any(call.name != "computer_task" for call in response.tool_calls)
+            ):
+                # Notes do not consume the observation; other tools and final answers retire it.
+                retire_computer_observations()
             if not response.tool_calls:
                 diagnostic(
                     "turn_end", elapsed_ms=round((time.monotonic() - turn_started) * 1000),
@@ -567,10 +572,8 @@ def run_turn(
                 call_message["tool_calls"].append({
                     "id": call.id, "name": call.name, "arguments": call.arguments,
                 })
-                if result_images:
-                    for previous in messages:
-                        if previous.get("role") == "tool" and previous.get("name", "").startswith("computer_"):
-                            previous.pop("images", None)
+                if result_images or history_text is not None:
+                    retire_computer_observations()
                 tool_message = {
                     "role": "tool", "tool_call_id": call.id,
                     "name": call.name, "content": result,
@@ -607,12 +610,7 @@ def run_turn(
         raise
     finally:
         if computer_session is not None:
-            for message in messages:
-                if message.get("role") == "tool" and message.get("name", "").startswith("computer_"):
-                    message.pop("images", None)
-                    summary_text = computer_history.pop(message.get("tool_call_id"), None)
-                    if summary_text is not None:
-                        message["content"] = summary_text
+            retire_computer_observations()
         timer.cancel()
         try:
             browser.close()

@@ -12,6 +12,8 @@ def computer_task_schema() -> dict[str, Any]:
     return {
         "type": "function", "name": "computer_task",
         "description": (
+            "Optional bookkeeping, not a prerequisite for desktop actions or verification. "
+            "Skip this tool for a single outcome; start with computer_observe instead. "
             "Save progress for computer work with multiple outcomes, multiple apps, or a likely need to "
             "resume later. One outcome, such as opening one file, needs no record even if it takes several "
             "UI actions. Start with a goal, distinctly named done checks, and distinctly named short steps. "
