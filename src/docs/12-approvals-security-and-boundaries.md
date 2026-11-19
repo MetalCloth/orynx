@@ -51,6 +51,7 @@ Native Firecrawl browser actions and local desktop input both run without per-ac
 | Playwright safe-list operations | Usually no approval; navigation to private/unverified host requires it |
 | Other exposed Playwright actions | Require approval |
 | Hidden Playwright code/evaluate/screenshot/storage-state tools | Not advertised |
+| Playwright local Brave connection | Uses the user's approved remote-debugging session; reconnects may show Brave's approval dialog again |
 | Unknown binding | Conservative approval classification, then unavailable error if called |
 
 Annotations come from servers and are not a complete side-effect proof. Even a read can reveal private account data or incur service usage. The current policy is explicit and small; a general policy engine is not implemented in the empty security modules.

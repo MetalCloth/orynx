@@ -17,14 +17,15 @@ from urllib.parse import urlsplit
 import httpx2
 
 from src.mcp.adapter import provider_tool, provider_tool_name, result_text
-from src.mcp.discovery import MCPServerConfig, SERVER_NAMES, server_configs
+from src.mcp.discovery import MCPServerConfig, PLAYWRIGHT_SERVERS, SERVER_NAMES, server_configs
 from src.providers.types import retry_after_seconds
 
 
 _SAFE_PLAYWRIGHT_TOOLS = {
     "browser_navigate", "browser_snapshot", "browser_tabs", "browser_go_back",
     "browser_go_forward", "browser_reload", "browser_wait_for",
-    "browser_console_messages", "browser_network_requests",
+    "browser_console_messages", "browser_network_requests", "browser_network_request",
+    "browser_navigate_back", "browser_find",
 }
 _HIDDEN_PLAYWRIGHT_MARKERS = ("run_code", "evaluate", "screenshot", "storage_state")
 _SAFE_ENV_NAMES = {
@@ -245,15 +246,21 @@ class MCPClient:
         if binding is None:
             return True
         server_name, tool_name, _ = binding
-        if server_name != "playwright":
+        if server_name not in PLAYWRIGHT_SERVERS:
             if server_name in {"github", "context7", "microsoft_learn", "tavily"}:
                 return False
             return provider_name not in self._read_only_tools
         if tool_name not in _SAFE_PLAYWRIGHT_TOOLS:
             return True
-        return tool_name == "browser_navigate" and self._private_or_unverified_url(
-            (arguments or {}).get("url")
-        )
+        args = arguments or {}
+        navigates = tool_name == "browser_navigate"
+        return navigates and self._private_or_unverified_url(args.get("url"))
+
+    def tool_environment(self, provider_name: str) -> str | None:
+        server = self._bindings.get(provider_name, (None, None, None))[0]
+        if server in PLAYWRIGHT_SERVERS:
+            return "local_desktop"
+        return None
 
     @staticmethod
     def _validate_browser_url(value: Any) -> None:
@@ -298,10 +305,10 @@ class MCPClient:
         if not isinstance(arguments, dict):
             raise ValueError("MCP tool arguments must be an object.")
         server_name, tool_name, client = binding
-        if server_name == "playwright" and tool_name == "browser_navigate":
+        if server_name in PLAYWRIGHT_SERVERS and tool_name == "browser_navigate":
             self._validate_browser_url(arguments.get("url"))
         assert self._loop is not None
-        read_only = server_name != "playwright" and (
+        read_only = server_name not in PLAYWRIGHT_SERVERS and (
             server_name in {"github", "context7", "microsoft_learn", "tavily"}
             or provider_name in self._read_only_tools
         )
@@ -536,7 +543,7 @@ class MCPClient:
             registered = []
             for tool in tools:
                 tool_name = tool.name
-                if config.name == "playwright" and any(
+                if config.name in PLAYWRIGHT_SERVERS and any(
                     marker in tool_name.casefold() for marker in _HIDDEN_PLAYWRIGHT_MARKERS
                 ):
                     continue

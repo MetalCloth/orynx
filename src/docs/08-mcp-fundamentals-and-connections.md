@@ -151,17 +151,13 @@ These are the exact presets in this source snapshot. Endpoints and server-advert
 | `exa` | Hosted: `https://mcp.exa.ai/mcp` | Optional `EXA_API_KEY` in `x-api-key` header | Advertised search/page reading |
 | `linear` | Hosted: `https://mcp.linear.app/mcp` | Required `LINEAR_API_KEY` in this implementation | Issues, projects, comments, and advertised operations |
 | `notion` | Hosted: `https://mcp.notion.com/mcp` | Explicit browser OAuth, or an actual `NOTION_ACCESS_TOKEN` | Authorized workspace pages/databases and advertised operations |
-| `playwright` | Local stdio through `npx` | No company account key in preset | Isolated headless browser operations |
+| `playwright` | Local stdio through Oryn's Brave endpoint launcher | Brave remote debugging must be enabled and its connection approved | Playwright accessibility snapshots and browser actions against the user's existing Brave session |
 
-GitHub and Context7 originally belonged to the first locally launched MCP set. Their current presets are hosted. Playwright remains local.
+GitHub and Context7 originally belonged to the first locally launched MCP set. Their current presets are hosted. Playwright is the local browser path and attaches to Brave only when its current DevTools endpoint is available; it does not fall back to launching a separate browser. Firecrawl remains a separate remote browser.
 
-The Playwright command configured by Oryn is:
+Oryn starts the Playwright MCP through a small launcher. It reads Brave's current `DevToolsActivePort` file and passes its WebSocket endpoint to the pinned Playwright MCP release. If the endpoint is missing or malformed, the launcher exits with an error rather than starting an isolated browser.
 
-```bash
-npx -y @playwright/mcp@latest --headless --isolated --idle-timeout=300000
-```
-
-Oryn launches it as a managed subprocess. Running the command manually is useful for diagnosing installation, but Oryn cannot attach to arbitrary terminal stdin/stdout from an unrelated process. A stdio server uses the pipes of the client that started it.
+The MCP process is managed by Oryn and remains connected across calls. Brave's remote-debugging approval is per connection, so reconnecting the server or restarting Oryn can require another approval.
 
 ## 7. Are the servers running on my laptop?
 

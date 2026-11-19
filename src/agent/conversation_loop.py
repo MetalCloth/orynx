@@ -209,6 +209,12 @@ def run_turn(
     confirm_mcp = guarded_approval(confirm_mcp)
 
     def call_mcp(call: ToolCall) -> str:
+        nonlocal route_scope, ui_route_used
+        environment_for = getattr(mcp_client, "tool_environment", None)
+        environment = environment_for(call.name) if callable(environment_for) else None
+        if environment in {"local_desktop", "remote_browser"}:
+            if route_scope not in (None, environment, "mixed"):
+                raise ValueError("This browser belongs to another UI environment. Use the task's current browser or explicitly declare a mixed task.")
         kwargs = {"cancel_event": turn_cancel}
 
         def retry(attempt: int, delay: float) -> None:
@@ -217,6 +223,10 @@ def run_turn(
                 on_status(f"Temporary MCP read failure · {call.name} · retry {attempt}/3 in {delay:g}s")
 
         kwargs["on_retry"] = retry
+        if environment in {"local_desktop", "remote_browser"}:
+            # A timed-out browser call may already have changed its page.
+            route_scope = route_scope or environment
+            ui_route_used = True
         return mcp_client.call_tool(call.name, call.arguments, **kwargs)
 
     try:

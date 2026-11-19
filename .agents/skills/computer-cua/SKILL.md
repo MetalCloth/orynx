@@ -5,6 +5,8 @@ description: Use Oryn's scoped local-desktop observations and actions on Hyprlan
 
 # Oryn computer guide: CUA on Hyprland
 
+For webpage work in local Brave, use the `playwright` MCP only when Brave's remote-debugging connection is enabled and approved. Oryn remains the planner; Playwright MCP supplies browser controls and accessibility snapshots. Native desktop/browser-chrome controls and visual gaps remain on `computer_*`. Firecrawl is a separate remote browser, not evidence about the local Brave tab.
+
 The user's task defines the goal. The selected model plans inside Oryn's normal conversation/tool loop and chooses `computer_*` only for a task that needs the live local desktop. `ComputerSession` validates scoped calls; Hyprland lists workspaces and focuses chosen windows. CUA Driver supplies exact window IDs, accessibility state, screenshots, and native verification through Oryn's private `cua-driver serve`/`call` socket. Dotool dispatches clicks, keys, text, and scrolls as described in the companion `computer-dotool` skill. CUA is observation/verification only; it is not the planner, and Oryn does not use CUA MCP or CUA's `ComputerAgent` loop. Call only Oryn's advertised `computer_*` tools—never raw `cua-driver` commands or CUA-specific tool names.
 
 ## Interaction sequence

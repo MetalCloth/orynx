@@ -27,6 +27,104 @@ from src.tools.registry import tool_schemas
 
 
 class MCPTests(unittest.TestCase):
+    def test_playwright_preset_attaches_to_local_brave_and_is_not_isolated(self):
+        with patch("src.mcp.discovery.local_secret", return_value=""):
+            with patch("src.mcp.discovery.brave_cdp_endpoint", return_value="ws://127.0.0.1:9222/devtools/browser/test"):
+                configs = {c.name: c for c in server_configs(set())}
+                local = {c.name: c for c in server_configs({"playwright"})}["playwright"]
+                with patch("src.mcp.discovery.brave_cdp_endpoint", side_effect=RuntimeError("enable debugging")):
+                    unavailable = {c.name: c for c in server_configs({"playwright"})}["playwright"]
+        self.assertFalse(configs["playwright"].enabled)
+        self.assertTrue(local.enabled)
+        self.assertEqual(local.command, sys.executable)
+        self.assertTrue(local.args[0].endswith("/src/mcp/playwright_brave.py"))
+        from src.mcp.playwright_brave import PLAYWRIGHT_MCP_VERSION
+        self.assertEqual(PLAYWRIGHT_MCP_VERSION, "0.0.85")
+        self.assertNotIn("--isolated", local.args)
+        self.assertNotIn("--headless", local.args)
+        self.assertIn("existing Brave session", local.access)
+        self.assertNotIn("browser_use_local", SERVER_NAMES)
+        self.assertEqual(local.disabled_reason, "")
+        self.assertIn("enable debugging", unavailable.disabled_reason)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "settings.json"
+            path.write_text(json.dumps({"enabled_servers": ["playwright"], "known_servers": ["playwright"]}))
+            self.assertEqual(load_enabled_servers(path), {"playwright"})
+            save_enabled_servers({"playwright"}, path)
+            self.assertEqual(load_enabled_servers(path), {"playwright"})
+
+    def test_local_playwright_action_policy_and_environment(self):
+        client = MCPClient(configs=[])
+        for tool in ("browser_click", "browser_snapshot", "browser_navigate"):
+            client._bindings[f"mcp__playwright__{tool}"] = ("playwright", tool, Mock())
+        self.assertTrue(client.requires_approval("mcp__playwright__browser_click"))
+        self.assertFalse(client.requires_approval("mcp__playwright__browser_snapshot"))
+        self.assertEqual(client.tool_environment("mcp__playwright__browser_snapshot"), "local_desktop")
+
+    def test_brave_endpoint_uses_current_devtools_websocket_and_fails_closed(self):
+        from src.mcp.playwright_brave import brave_cdp_endpoint
+
+        with tempfile.TemporaryDirectory() as folder:
+            profile = Path(folder)
+            (profile / "DevToolsActivePort").write_text("9222\n/devtools/browser/current-session\n")
+            self.assertEqual(
+                brave_cdp_endpoint(profile),
+                "ws://127.0.0.1:9222/devtools/browser/current-session",
+            )
+            (profile / "DevToolsActivePort").write_text("bad\n/not-a-browser-path\n")
+            with self.assertRaisesRegex(RuntimeError, "invalid"):
+                brave_cdp_endpoint(profile)
+            (profile / "DevToolsActivePort").write_text("99999\n/devtools/browser/current-session\n")
+            with self.assertRaisesRegex(RuntimeError, "invalid"):
+                brave_cdp_endpoint(profile)
+
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaisesRegex(RuntimeError, "remote debugging is not active"):
+                brave_cdp_endpoint(Path(folder))
+
+    def test_local_mcp_and_remote_browser_cannot_silently_replace_each_other(self):
+        local_name = "mcp__playwright__browser_click"
+        for local_first in (True, False):
+            with self.subTest(local_first=local_first), tempfile.TemporaryDirectory() as folder:
+                mcp = SimpleNamespace(
+                    tool_directory=Mock(return_value=[{"server": "playwright", "description": "Local Brave", "state": "connected", "tool_count": 1}]),
+                    tool_schemas=Mock(return_value=[{"name": local_name, "description": "Read local tab", "parameters": {"type": "object", "properties": {}}}]),
+                    diagnostic_snapshot=Mock(return_value={}), requires_approval=Mock(return_value=False),
+                    tool_environment=lambda name: "local_desktop", call_tool=Mock(return_value="LOCAL TAB"),
+                )
+                local = ToolCall("local", local_name, {})
+                remote = ToolCall("remote", "browser_open", {"url": "https://example.com"})
+                responses = [ModelResponse(tool_calls=[ToolCall("load", "load_mcp_tools", {"server": "playwright"})])]
+                responses += [ModelResponse(tool_calls=[c]) for c in ((local, remote) if local_first else (remote, local))]
+                responses.append(ModelResponse("Stopped at environment boundary."))
+                history = [{"role": "user", "content": "Inspect the requested browser."}]
+                with patch("src.agent.conversation_loop.execute_tool", return_value="REMOTE TAB") as execute:
+                    run_turn(history, Mock(side_effect=responses), tool_schemas(), Path(folder), Mock(), Mock(), mcp_client=mcp)
+                outputs = [m["content"] for m in history if m.get("role") == "tool"]
+                self.assertIn("Tool error:", outputs[-1])
+                self.assertEqual(mcp.call_tool.call_count, int(local_first))
+                self.assertEqual(execute.call_count, int(not local_first))
+
+    def test_uncertain_local_browser_call_still_binds_the_ui_route(self):
+        local_name = "mcp__playwright__browser_click"
+        mcp = SimpleNamespace(
+            tool_directory=Mock(return_value=[{"server": "playwright", "description": "Local Brave", "state": "connected", "tool_count": 1}]),
+            tool_schemas=Mock(return_value=[{"name": local_name, "description": "Click local tab", "parameters": {"type": "object", "properties": {}}}]),
+            diagnostic_snapshot=Mock(return_value={}), requires_approval=Mock(return_value=False),
+            tool_environment=lambda name: "local_desktop", call_tool=Mock(side_effect=ConnectionResetError("Input may have run")),
+        )
+        replies = [
+            ModelResponse(tool_calls=[ToolCall("load", "load_mcp_tools", {"server": "playwright"})]),
+            ModelResponse(tool_calls=[ToolCall("local", local_name, {})]),
+            ModelResponse(tool_calls=[ToolCall("remote", "browser_open", {"url": "https://example.com"})]),
+            ModelResponse("Inspect local state before continuing."),
+        ]
+        history = [{"role": "user", "content": "Use my local browser."}]
+        with tempfile.TemporaryDirectory() as folder, patch("src.agent.conversation_loop.execute_tool") as execute:
+            run_turn(history, Mock(side_effect=replies), tool_schemas(), Path(folder), Mock(), Mock(), mcp_client=mcp)
+        execute.assert_not_called()
+        self.assertIn("bound to the live local desktop", history[-1]["content"])
+
     def test_transient_reads_retry_but_mutations_permanent_errors_and_cancelled_calls_do_not(self):
         request = httpx2.Request("POST", "https://example.com/mcp")
         unauthorized = httpx2.HTTPStatusError("Unauthorized", request=request,
@@ -58,6 +156,7 @@ class MCPTests(unittest.TestCase):
         for server, hinted_read, failure, retries in scenarios:
             client = MCPClient(configs=[])
             client.start = Mock()
+            client._call_local_browser = Mock()
             client._loop = Mock()
             name = f"mcp__{server}__action"
             client._bindings[name] = (server, "action", Mock())

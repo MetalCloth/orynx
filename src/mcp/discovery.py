@@ -1,9 +1,11 @@
 """Oryn's small, known-good MCP server presets."""
 
 import json
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from src.mcp.playwright_brave import brave_cdp_endpoint
 from src.security.secrets import local_secret
 
 
@@ -11,6 +13,7 @@ SERVER_NAMES = (
     "github", "context7", "microsoft_learn", "huggingface", "tavily",
     "firecrawl", "exa", "linear", "notion", "playwright",
 )
+PLAYWRIGHT_SERVERS = frozenset({"playwright"})
 _DEFAULT_ENABLED: set[str] = set()
 _LEGACY_SERVERS = {"context7", "github", "playwright"}
 
@@ -72,10 +75,15 @@ def save_enabled_servers(enabled: set[str], path: Path | None = None) -> None:
 
 
 def server_configs(enabled_servers: set[str] | None = None) -> list[MCPServerConfig]:
-    """Use official hosted endpoints; keep the existing isolated Playwright browser."""
+    """Use official hosted endpoints and Playwright controls for the user's local Brave."""
     enabled = load_enabled_servers() if enabled_servers is None else enabled_servers
     if not enabled <= set(SERVER_NAMES):
         raise ValueError("Unknown MCP server.")
+    try:
+        brave_cdp_endpoint()
+        playwright_disabled_reason = ""
+    except RuntimeError as exc:
+        playwright_disabled_reason = str(exc)
     # Credentials stay in request headers, never URLs or subprocess arguments.
     presets = (
         ("github", "https://api.githubcopilot.com/mcp/readonly", "GITHUB_PERSONAL_ACCESS_TOKEN",
@@ -120,13 +128,13 @@ def server_configs(enabled_servers: set[str] | None = None) -> list[MCPServerCon
     return [
         *configs,
         MCPServerConfig(
-            "playwright", "npx",
-            (
-                "-y", "@playwright/mcp@latest", "--headless", "--isolated",
-                "--idle-timeout=300000",
-            ),
+            "playwright", sys.executable,
+            (str(Path(__file__).with_name("playwright_brave.py")),),
             {},
+            disabled_reason=playwright_disabled_reason,
             enabled="playwright" in enabled,
-            access="Opens pages and reads browser content; sensitive browser actions need approval.",
+            access=("Playwright MCP controls for the user's existing Brave session via its approved CDP endpoint. "
+                    "Uses accessibility snapshots and fresh element references. If Brave's endpoint is unavailable, "
+                    "the local server fails closed instead of starting a separate browser."),
         ),
     ]
