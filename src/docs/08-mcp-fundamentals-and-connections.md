@@ -18,7 +18,7 @@ The analogy has a limit: MCP does not supply every account permission automatica
 | --- | --- |
 | Host | Oryn, the application managing the conversation and deciding when to use tools |
 | MCP client | The SDK-backed integration in `MCPClient` |
-| MCP server | An official hosted endpoint, or the local Playwright subprocess |
+| MCP server | An official hosted endpoint, or the local Playwright service |
 | External service | GitHub repositories, a Notion workspace, Linear issues, library documentation, and similar data/actions |
 
 ```mermaid
@@ -40,7 +40,7 @@ The harness starts connections and calls discovery before constructing the model
 1. The application creates its `MCPClient` with known presets and enabled preferences.
 2. The client starts its background asyncio loop.
 3. Each enabled configuration is evaluated for missing credentials or runtime dependencies.
-4. Oryn opens the transport: hosted HTTP or local stdio.
+4. Oryn opens the transport: hosted HTTP, local stdio, or the persistent Playwright HTTP endpoint.
 5. The SDK establishes the protocol session/initialization.
 6. Oryn calls `list_tools`, following pagination.
 7. The adapter validates each tool's name and object input schema.
@@ -151,13 +151,13 @@ These are the exact presets in this source snapshot. Endpoints and server-advert
 | `exa` | Hosted: `https://mcp.exa.ai/mcp` | Optional `EXA_API_KEY` in `x-api-key` header | Advertised search/page reading |
 | `linear` | Hosted: `https://mcp.linear.app/mcp` | Required `LINEAR_API_KEY` in this implementation | Issues, projects, comments, and advertised operations |
 | `notion` | Hosted: `https://mcp.notion.com/mcp` | Explicit browser OAuth, or an actual `NOTION_ACCESS_TOKEN` | Authorized workspace pages/databases and advertised operations |
-| `playwright` | Local stdio through Oryn's Brave endpoint launcher | Brave remote debugging must be enabled and its connection approved | Playwright accessibility snapshots and browser actions against the user's existing Brave session |
+| `playwright` | Persistent loopback HTTP service, managed by systemd user service | Brave remote debugging must be enabled and its browser connection approved | Playwright accessibility snapshots and browser actions against the user's existing Brave session |
 
 GitHub and Context7 originally belonged to the first locally launched MCP set. Their current presets are hosted. Playwright is the local browser path and attaches to Brave only when its current DevTools endpoint is available; it does not fall back to launching a separate browser. Firecrawl remains a separate remote browser.
 
-Oryn starts the Playwright MCP through a small launcher. It reads Brave's current `DevToolsActivePort` file and passes its WebSocket endpoint to the pinned Playwright MCP release. If the endpoint is missing or malformed, the launcher exits with an error rather than starting an isolated browser.
+Oryn starts the Playwright MCP through one systemd user service. It reads Brave's current `DevToolsActivePort` file and passes its WebSocket endpoint to the pinned Playwright MCP release. If the endpoint is missing or malformed, startup fails rather than opening an isolated browser. The HTTP service binds to `127.0.0.1:8931` and has no authentication; other local processes can reach it while enabled.
 
-The MCP process is managed by Oryn and remains connected across calls. Brave's remote-debugging approval is per connection, so reconnecting the server or restarting Oryn can require another approval.
+The HTTP service is separate from Oryn, so it remains running when Oryn exits. A service-owned anchor MCP client keeps the shared CDP browser attached between Oryn sessions. If Brave restarts and its endpoint changes, Oryn replaces the service once and Brave may ask for approval again. Disabling Playwright in Oryn stops the service and its anchor.
 
 ## 7. Are the servers running on my laptop?
 
@@ -165,14 +165,16 @@ The MCP process is managed by Oryn and remains connected across calls. Brave's r
 flowchart LR
     subgraph LOCAL["Your laptop"]
         O["Oryn process"] --> C["MCP client thread"]
-        C --> P["Local Playwright server process"]
+        C --> P["Loopback HTTP MCP endpoint"]
+        S["systemd user service"] --> P
+        P --> B["Existing Brave session over CDP"]
     end
     C --> G["GitHub hosted server"]
     C --> N["Notion hosted server"]
     C --> R["Other configured hosted servers"]
 ```
 
-The client is local. Nine server endpoints are remote. The local browser server is managed by the Oryn process while connected; browser idle behavior is controlled by its configured timeout and server implementation. This is different from manually maintaining ten independent server windows.
+The MCP client is local. Nine server endpoints are remote. The Playwright server is managed by a systemd user service so it outlives Oryn; inspect or stop it with `systemctl --user status oryn-playwright-bridge.service` or `systemctl --user stop oryn-playwright-bridge.service`.
 
 ## 8. Authentication, identity, and private GitHub repositories
 

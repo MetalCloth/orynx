@@ -61,7 +61,7 @@ flowchart LR
             TX --> DB
             TW --> DB
         end
-        ML --> STD["Local Playwright MCP subprocess, when enabled"]
+        ML --> STD["Persistent Playwright MCP service, when enabled"]
         TW --> TERM["Approved shell subprocess inside Bubblewrap"]
         TW --> FILE["Selected project files"]
     end
@@ -72,7 +72,7 @@ flowchart LR
 
 The TUI is an application in the terminal. It does not need to open a browser dashboard or run a separate localhost API server. Python imports the harness and uses it directly. The remote model and remote services remain separate systems.
 
-The local Playwright server is a subprocess that Oryn starts through `npx`. Hosted MCP connections are outbound network connections; Oryn does not launch a copy of Linear, Notion, or GitHub on the laptop.
+The local Playwright server runs as a systemd user service so it can stay alive across Oryn restarts. Oryn connects to its loopback HTTP endpoint; the service uses `npx` and Brave's existing CDP endpoint, with a persistent MCP anchor keeping the shared browser session open between Oryn clients. Hosted MCP connections are outbound network connections; Oryn does not launch a copy of Linear, Notion, or GitHub on the laptop.
 
 ## 4. Process layout: dashboard
 

@@ -1,4 +1,4 @@
-"""Synchronous bridge to hosted MCP connections and the local Playwright client."""
+"""Synchronous bridge to hosted MCP connections and Oryn's persistent Playwright service."""
 
 import asyncio
 import ipaddress
@@ -18,6 +18,7 @@ import httpx2
 
 from src.mcp.adapter import provider_tool, provider_tool_name, result_text
 from src.mcp.discovery import MCPServerConfig, PLAYWRIGHT_SERVERS, SERVER_NAMES, server_configs
+from src.mcp.playwright_bridge import ensure_playwright_bridge, stop_playwright_bridge
 from src.providers.types import retry_after_seconds
 
 
@@ -48,7 +49,7 @@ def _server_environment(extra: dict[str, str]) -> dict[str, str]:
 
 
 class MCPClient:
-    """Own connected server processes for one Oryn process."""
+    """Own MCP connections for one Oryn process; Playwright's service outlives it."""
 
     def __init__(self, configs: list[MCPServerConfig] | None = None) -> None:
         self._uses_presets = configs is None
@@ -452,6 +453,8 @@ class MCPClient:
             self._status_by_name[config.name] = ("unavailable", message)
             return f"{config.name}: not connected; {message}"
         try:
+            if config.name in PLAYWRIGHT_SERVERS and config.url:
+                ensure_playwright_bridge()
             count = await self._connect_one(client_type, parameters_type, config, command)
         except Exception as exc:
             while isinstance(exc, BaseExceptionGroup) and exc.exceptions:
@@ -495,6 +498,11 @@ class MCPClient:
                 ("starting", "Connecting.") if config.enabled else ("disabled", "Disabled in Oryn settings.")
             )
 
+        if "playwright" in changed and not next(
+            (config.enabled for config in self.configs if config.name == "playwright"), False,
+        ):
+            stop_playwright_bridge()
+
         enabled = [config for config in self.configs if config.name in changed and config.enabled]
         if enabled:
             from mcp import Client
@@ -529,7 +537,9 @@ class MCPClient:
                 errlog = stack.enter_context(open(os.devnull, "w"))
                 transport = stdio_client(params, errlog=errlog)
             # Hosted servers currently use the stable initialize handshake.
-            mode = "legacy" if config.url or config.name == "github" else "auto"
+            mode = "legacy" if config.url and config.name not in PLAYWRIGHT_SERVERS else "auto"
+            if config.name == "github":
+                mode = "legacy"
             client = await stack.enter_async_context(client_type(transport, mode=mode))
             tools = []
             cursor = None

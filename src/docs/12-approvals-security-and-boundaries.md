@@ -51,10 +51,12 @@ Native Firecrawl browser actions and local desktop input both run without per-ac
 | Playwright safe-list operations | Usually no approval; navigation to private/unverified host requires it |
 | Other exposed Playwright actions | Require approval |
 | Hidden Playwright code/evaluate/screenshot/storage-state tools | Not advertised |
-| Playwright local Brave connection | Uses the user's approved remote-debugging session; reconnects may show Brave's approval dialog again |
+| Playwright local Brave connection | Uses the user's approved remote-debugging session; a persistent loopback service keeps the connection across Oryn restarts, but a Brave restart may require approval again |
 | Unknown binding | Conservative approval classification, then unavailable error if called |
 
 Annotations come from servers and are not a complete side-effect proof. Even a read can reveal private account data or incur service usage. The current policy is explicit and small; a general policy engine is not implemented in the empty security modules.
+
+The persistent Playwright MCP HTTP endpoint binds only to `127.0.0.1`, but has no authentication. Other processes on the same machine can invoke it while Playwright is enabled. Disabling Playwright stops the service.
 
 ## 4. Approval lifecycle in the dashboard
 

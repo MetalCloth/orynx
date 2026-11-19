@@ -36,13 +36,13 @@ class MCPTests(unittest.TestCase):
                     unavailable = {c.name: c for c in server_configs({"playwright"})}["playwright"]
         self.assertFalse(configs["playwright"].enabled)
         self.assertTrue(local.enabled)
-        self.assertEqual(local.command, sys.executable)
-        self.assertTrue(local.args[0].endswith("/src/mcp/playwright_brave.py"))
+        self.assertEqual(local.url, "http://127.0.0.1:8931/mcp")
+        self.assertEqual(local.command, "")
         from src.mcp.playwright_brave import PLAYWRIGHT_MCP_VERSION
         self.assertEqual(PLAYWRIGHT_MCP_VERSION, "0.0.85")
-        self.assertNotIn("--isolated", local.args)
-        self.assertNotIn("--headless", local.args)
+        self.assertEqual(local.args, ())
         self.assertIn("existing Brave session", local.access)
+        self.assertIn("other processes on this machine", local.access)
         self.assertNotIn("browser_use_local", SERVER_NAMES)
         self.assertEqual(local.disabled_reason, "")
         self.assertIn("enable debugging", unavailable.disabled_reason)
@@ -81,6 +81,117 @@ class MCPTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             with self.assertRaisesRegex(RuntimeError, "remote debugging is not active"):
                 brave_cdp_endpoint(Path(folder))
+
+    def test_playwright_bridge_reuses_the_existing_service_for_the_same_brave_session(self):
+        from src.mcp.playwright_bridge import BRIDGE_URL, ensure_playwright_bridge
+
+        with patch("src.mcp.playwright_bridge._active", return_value=True), \
+             patch("src.mcp.playwright_bridge._stored_endpoint", return_value="ws://127.0.0.1:9222/devtools/browser/a"), \
+             patch("src.mcp.playwright_bridge._port_accepting", return_value=True), \
+             patch("src.mcp.playwright_bridge._start_service") as start, \
+             patch("src.mcp.playwright_bridge._stop_service") as stop:
+            url = ensure_playwright_bridge("ws://127.0.0.1:9222/devtools/browser/a")
+        self.assertEqual(url, BRIDGE_URL)
+        start.assert_not_called()
+        stop.assert_not_called()
+
+    def test_playwright_bridge_starts_once_without_opening_a_cdp_websocket(self):
+        from src.mcp.playwright_bridge import BRIDGE_URL, ensure_playwright_bridge
+
+        endpoint = "ws://127.0.0.1:9222/devtools/browser/a"
+        with patch("src.mcp.playwright_bridge._active", side_effect=[False, True]), \
+             patch("src.mcp.playwright_bridge._stored_endpoint", return_value=endpoint), \
+             patch("src.mcp.playwright_bridge._port_accepting", side_effect=[True, False, True]), \
+             patch("src.mcp.playwright_bridge._start_service") as start, \
+             patch("src.mcp.playwright_bridge._stop_service") as stop:
+            self.assertEqual(ensure_playwright_bridge(endpoint), BRIDGE_URL)
+        start.assert_called_once_with(endpoint)
+        stop.assert_not_called()
+
+    def test_playwright_bridge_replaces_once_when_brave_endpoint_changes(self):
+        from src.mcp.playwright_bridge import ensure_playwright_bridge
+
+        old = "ws://127.0.0.1:9222/devtools/browser/a"
+        new = "ws://127.0.0.1:9333/devtools/browser/b"
+        with patch("src.mcp.playwright_bridge._active", side_effect=[True, True]), \
+             patch("src.mcp.playwright_bridge._stored_endpoint", side_effect=[old, new]), \
+             patch("src.mcp.playwright_bridge._port_accepting", return_value=True), \
+             patch("src.mcp.playwright_bridge._start_service") as start, \
+             patch("src.mcp.playwright_bridge._stop_service") as stop:
+            ensure_playwright_bridge(new)
+        stop.assert_called_once_with()
+        start.assert_called_once_with(new)
+
+    def test_playwright_bridge_fails_before_start_when_brave_listener_is_missing(self):
+        from src.mcp.playwright_bridge import ensure_playwright_bridge
+
+        with patch("src.mcp.playwright_bridge._port_accepting", return_value=False), \
+             patch("src.mcp.playwright_bridge._start_service") as start:
+            with self.assertRaisesRegex(RuntimeError, "not listening"):
+                ensure_playwright_bridge("ws://127.0.0.1:9222/devtools/browser/a")
+        start.assert_not_called()
+
+    def test_playwright_bridge_refuses_an_unmanaged_local_listener(self):
+        from src.mcp.playwright_bridge import ensure_playwright_bridge
+
+        with patch("src.mcp.playwright_bridge._active", return_value=False), \
+             patch("src.mcp.playwright_bridge._port_accepting", side_effect=[True, True]), \
+             patch("src.mcp.playwright_bridge._start_service") as start:
+            with self.assertRaisesRegex(RuntimeError, "unknown local process"):
+                ensure_playwright_bridge("ws://127.0.0.1:9222/devtools/browser/a")
+        start.assert_not_called()
+
+    def test_playwright_service_does_not_expose_cdp_endpoint_in_process_arguments(self):
+        from src.mcp.playwright_bridge import _start_service
+
+        endpoint = "ws://127.0.0.1:9222/devtools/browser/private-session-id"
+        with tempfile.TemporaryDirectory() as folder:
+            endpoint_file = Path(folder) / "playwright-bridge-endpoint"
+            with patch("src.mcp.playwright_bridge._STATE_PATH", endpoint_file), \
+                 patch("src.mcp.playwright_bridge.shutil.which", return_value="/usr/bin/systemd-run"), \
+                 patch("src.mcp.playwright_bridge.subprocess.run", return_value=SimpleNamespace(
+                     returncode=0, stderr="", stdout="",
+                 )) as run:
+                _start_service(endpoint)
+            command = run.call_args.args[0]
+            self.assertNotIn(endpoint, command)
+            self.assertFalse(any("ORYN_BRAVE_CDP_ENDPOINT" in arg for arg in command))
+            self.assertTrue(command[-2].endswith("/playwright_bridge_service.py"))
+            self.assertEqual(endpoint_file.read_text(encoding="utf-8").strip(), endpoint)
+            self.assertEqual(endpoint_file.stat().st_mode & 0o777, 0o600)
+
+    def test_persistent_bridge_anchor_holds_one_read_only_tabs_client(self):
+        from src.mcp.playwright_bridge_service import _connect_anchor
+
+        anchor = Mock()
+        anchor.diagnostic_snapshot.return_value = {"connected_count": 1}
+        anchor.call_tool.return_value = "one tab"
+        stop = threading.Event()
+        with patch("src.mcp.client.MCPClient", return_value=anchor) as make_client:
+            returned = _connect_anchor(stop)
+        self.assertIs(returned, anchor)
+        self.assertEqual(make_client.call_args.args[0][0].name, "playwright")
+        self.assertEqual(anchor.call_tool.call_args.args[:2], (
+            "mcp__playwright__browser_tabs", {"action": "list"},
+        ))
+        anchor.close.assert_not_called()
+
+    def test_persistent_bridge_anchor_rejects_playwright_error_results(self):
+        from src.mcp.playwright_bridge_service import _connect_anchor
+
+        anchor = Mock()
+        anchor.diagnostic_snapshot.return_value = {"connected_count": 1}
+        anchor.call_tool.return_value = "### Error\nCDP connection failed"
+        with patch("src.mcp.client.MCPClient", return_value=anchor):
+            with self.assertRaisesRegex(RuntimeError, "tab check failed"):
+                _connect_anchor(threading.Event())
+        anchor.close.assert_called_once_with()
+
+    def test_disabling_playwright_stops_the_persistent_service(self):
+        client = MCPClient([MCPServerConfig("playwright", url="http://127.0.0.1:8931/mcp", enabled=False)])
+        with patch("src.mcp.client.stop_playwright_bridge") as stop:
+            asyncio.run(client._reconfigure({"playwright"}))
+        stop.assert_called_once_with()
 
     def test_local_mcp_and_remote_browser_cannot_silently_replace_each_other(self):
         local_name = "mcp__playwright__browser_click"

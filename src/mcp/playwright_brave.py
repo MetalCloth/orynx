@@ -5,10 +5,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import shutil
+import socket
 import sys
 
 
 PLAYWRIGHT_MCP_VERSION = "0.0.85"
+PLAYWRIGHT_BRIDGE_HOST = "127.0.0.1"
+PLAYWRIGHT_BRIDGE_PORT = 8931
+PLAYWRIGHT_BRIDGE_ENDPOINT_FILE = Path.home() / ".mini-hermes" / "playwright-bridge-endpoint"
 
 
 def brave_cdp_endpoint(profile_dir: Path | None = None) -> str:
@@ -36,9 +40,17 @@ def brave_cdp_endpoint(profile_dir: Path | None = None) -> str:
 
 
 def main() -> int:
+    serve_http = sys.argv[1:] == ["--serve-http"]
     try:
-        endpoint = brave_cdp_endpoint()
-    except RuntimeError as exc:
+        endpoint = (
+            PLAYWRIGHT_BRIDGE_ENDPOINT_FILE.read_text(encoding="utf-8").strip()
+            if serve_http else brave_cdp_endpoint()
+        )
+        if serve_http and not endpoint:
+            raise RuntimeError("Oryn has not saved Brave's current debugging endpoint.")
+        if serve_http:
+            url_port(endpoint)
+    except (OSError, RuntimeError) as exc:
         print(f"Playwright local Brave connection unavailable: {exc}", file=sys.stderr)
         return 2
 
@@ -49,8 +61,34 @@ def main() -> int:
 
     env = os.environ.copy()
     env["PLAYWRIGHT_MCP_CDP_ENDPOINT"] = endpoint
-    os.execvpe(npx, [npx, "--yes", f"@playwright/mcp@{PLAYWRIGHT_MCP_VERSION}"], env)
+    command = [npx, "--yes", f"@playwright/mcp@{PLAYWRIGHT_MCP_VERSION}"]
+    if serve_http:
+        try:
+            with socket.create_connection(("127.0.0.1", url_port(endpoint)), timeout=0.5):
+                pass
+        except (OSError, RuntimeError, ValueError):
+            print("Playwright local Brave connection unavailable: Brave's debugging endpoint is not listening.",
+                  file=sys.stderr)
+            return 2
+        command.extend((
+            "--host", PLAYWRIGHT_BRIDGE_HOST, "--port", str(PLAYWRIGHT_BRIDGE_PORT),
+            "--shared-browser-context",
+        ))
+    os.execvpe(npx, command, env)
     return 0
+
+
+def url_port(endpoint: str) -> int:
+    from urllib.parse import urlsplit
+
+    try:
+        parsed = urlsplit(endpoint)
+        port = parsed.port
+    except ValueError as exc:
+        raise RuntimeError("Brave's debugging endpoint must use loopback WebSocket transport.") from exc
+    if parsed.scheme != "ws" or parsed.hostname != "127.0.0.1" or port is None:
+        raise RuntimeError("Brave's debugging endpoint must use loopback WebSocket transport.")
+    return port
 
 
 if __name__ == "__main__":

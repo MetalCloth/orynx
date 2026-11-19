@@ -1,11 +1,11 @@
 """Oryn's small, known-good MCP server presets."""
 
 import json
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from src.mcp.playwright_brave import brave_cdp_endpoint
+from src.mcp.playwright_bridge import BRIDGE_URL
 from src.security.secrets import local_secret
 
 
@@ -128,13 +128,12 @@ def server_configs(enabled_servers: set[str] | None = None) -> list[MCPServerCon
     return [
         *configs,
         MCPServerConfig(
-            "playwright", sys.executable,
-            (str(Path(__file__).with_name("playwright_brave.py")),),
-            {},
+            "playwright", url=BRIDGE_URL,
             disabled_reason=playwright_disabled_reason,
             enabled="playwright" in enabled,
-            access=("Playwright MCP controls for the user's existing Brave session via its approved CDP endpoint. "
-                    "Uses accessibility snapshots and fresh element references. If Brave's endpoint is unavailable, "
-                    "the local server fails closed instead of starting a separate browser."),
+            access=("Playwright MCP controls for the user's existing Brave session through one persistent, "
+                    "loopback-only HTTP service. Uses accessibility snapshots and fresh element references. "
+                    "Brave approval is still needed for a new browser connection; the unauthenticated local "
+                    "service is reachable by other processes on this machine while enabled."),
         ),
     ]

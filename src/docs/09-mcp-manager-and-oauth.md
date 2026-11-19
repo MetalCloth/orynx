@@ -109,7 +109,7 @@ UI persistence failures are handled by attempting to restore the prior live enab
 }
 ```
 
-Enabling an entry is an explicit user action. Oryn starts no MCP server by default, including the local Playwright subprocess. If a preferences file is malformed or contains unknown values, the fallback is the empty set.
+Enabling an entry is an explicit user action. Oryn starts no MCP server by default, including the persistent local Playwright service. If a preferences file is malformed or contains unknown values, the fallback is the empty set. When Playwright is enabled, its service continues running across Oryn restarts and is stopped when Playwright is disabled.
 
 `known_servers` preserves older user decisions when new presets are added. Previously known disabled servers stay disabled; newly introduced servers stay disabled until the user enables them. Malformed preference data fails closed to the empty set.
 

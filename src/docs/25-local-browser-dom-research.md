@@ -16,9 +16,9 @@ Both tools can connect to a logged-in Chromium browser over CDP. Both need Brave
 
 ## Local connection design
 
-The Playwright MCP server is launched through [the Brave endpoint launcher](../mcp/playwright_brave.py). It reads Brave's current `DevToolsActivePort` and passes its loopback WebSocket endpoint to a pinned `@playwright/mcp` release. Reading the WebSocket path avoids relying on `/json/version`, which this Brave currently answers with HTTP 404.
+The Playwright MCP server is managed by [the persistent bridge](../mcp/playwright_bridge.py) and [Brave endpoint launcher](../mcp/playwright_brave.py). It reads Brave's current `DevToolsActivePort` and passes its loopback WebSocket endpoint to a pinned `@playwright/mcp` release. Reading the WebSocket path avoids relying on `/json/version`, which this Brave currently answers with HTTP 404.
 
-The launcher fails closed if the endpoint is absent or malformed. It must not start an isolated, headless, or temporary browser. Reconnecting or restarting Oryn creates a new browser-debugging connection and may show Brave's **Allow remote debugging?** dialog again. Within one Oryn process, the MCP server is persistent and should be reused across calls; do not create one server per action.
+The launcher fails closed if the endpoint is absent or malformed. It must not start an isolated, headless, or temporary browser. One user-level systemd service provides an HTTP MCP endpoint on loopback and holds an anchor MCP client so its shared CDP browser remains attached across Oryn restarts. Oryn reuses it for the same Brave endpoint; if Brave restarts and changes that endpoint, Oryn replaces the service once and Brave may ask for approval again. The HTTP service has no authentication, so other local processes can reach it while it is enabled. It is not reachable over the LAN.
 
 ## Oryn integration boundaries
 
@@ -31,6 +31,6 @@ The launcher fails closed if the endpoint is absent or malformed. It must not st
 
 ## Validation status
 
-Unit tests cover the endpoint-file parser, fail-closed behavior, MCP preset, route classification, and action approvals. No live Playwright connection has been made after this configuration change. The next live check should be performed once through Oryn's long-lived MCP connection and read only the existing tab's snapshot; do not navigate or alter page content merely to prove attachment.
+Live validation on 2026-11-20 confirmed that after Oryn restarted, its Playwright MCP connection listed five existing Brave tabs and read snapshots from the current Netflix tab and the Chrome remote-debugging tab. The latter exposed its page title, headings, checked remote-debugging state, and `127.0.0.1:9222` listener. Netflix exposed only a sparse snapshot. Selecting the last tab changed Brave's active tab as requested; no page content or setting was changed. The bridge service and its Brave CDP socket remained active after Oryn reconnected.
 
-The earlier Browser Use temporary-browser test is not evidence for this Playwright connection. Browser Use diagnostic attempts created short-lived connections and caused repeated Brave approval prompts; do not repeat that pattern. The Playwright server must be kept alive across calls, and approval may be needed again after a deliberate reconnect or Oryn restart.
+The earlier Browser Use temporary-browser test is not evidence for this Playwright connection. Browser Use diagnostic attempts created short-lived connections and caused repeated Brave approval prompts; do not repeat that pattern. The persistent service was verified across an Oryn restart. Approval may still be needed if Brave itself restarts or the service must be replaced.
