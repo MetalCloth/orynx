@@ -15,6 +15,89 @@ from src.tools.computer_session import ComputerResult
 
 
 class ConversationLoopTests(unittest.TestCase):
+    def test_builtin_computer_guide_is_omitted_only_when_already_supplied_and_not_named(self):
+        from src.agent.skills import discover_skills
+        from src.tools.computer_session import COMPUTER_INSTRUCTIONS
+
+        root = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory() as folder:
+            catalog, _ = discover_skills(root, Path(folder))
+        self.assertIn("computer-cua", catalog)
+        self.assertIn("caelestia-hyprland", catalog)
+        self.assertIn("computer-dotool", catalog)
+        for enabled, request, hide in (
+            (True, "Open Brave.", True),
+            (False, "Explain computer use.", False),
+            (True, "Use $computer-cua to open Brave.", False),
+            (True, "Read the COMPUTER-CUA skill.", False),
+            (True, "Read computer-cua-extra.", True),
+        ):
+            with self.subTest(enabled=enabled, request=request):
+                complete = Mock(return_value=ModelResponse("Ready."))
+                session = Mock() if enabled else None
+                if session is not None:
+                    session.dry_run = False
+                with patch("src.agent.skills.discover_skills", return_value=(catalog, [])):
+                    run_turn(
+                        [{"role": "user", "content": "Use computer-cua."},
+                         {"role": "assistant", "content": "Done."},
+                         {"role": "user", "content": request}],
+                        complete, [], root, Mock(), Mock(), computer_session=session,
+                    )
+                messages, tools = complete.call_args.args[:2]
+                loader = next(tool for tool in tools if tool["name"] == "load_skill")
+                self.assertEqual(set(loader["parameters"]["properties"]["name"]["enum"]),
+                                 set(catalog) - ({"computer-cua"} if hide else set()))
+                self.assertEqual(any(message.get("content") == COMPUTER_INSTRUCTIONS
+                                     for message in messages), enabled)
+                if session is not None:
+                    session.execute.assert_not_called()
+
+    def test_explicit_builtin_computer_skill_request_still_loads_and_is_audited(self):
+        from src.agent.skills import discover_skills
+
+        root = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory() as folder:
+            catalog, _ = discover_skills(root, Path(folder))
+        complete = Mock(side_effect=[
+            ModelResponse(tool_calls=[ToolCall("guide", "load_skill", {"name": "computer-cua"})]),
+            ModelResponse("Guide loaded."),
+        ])
+        diagnostics = []
+        with patch("src.agent.skills.discover_skills", return_value=(catalog, [])):
+            run_turn(
+                [{"role": "user", "content": "Load the computer-cua skill."}],
+                complete, [], root, Mock(), Mock(), computer_session=Mock(),
+                on_diagnostic=lambda _id, event: diagnostics.append(event),
+            )
+        second_messages, second_tools = complete.call_args.args[:2]
+        guide_result = next(message for message in second_messages if message.get("role") == "tool")
+        self.assertIn(catalog["computer-cua"].instructions, guide_result["content"])
+        loader = next(tool for tool in second_tools if tool["name"] == "load_skill")
+        self.assertNotIn("computer-cua", loader["parameters"]["properties"]["name"]["enum"])
+        self.assertEqual([event["skill_name"] for event in diagnostics if event["type"] == "skill_loaded"],
+                         ["computer-cua"])
+
+    def test_same_named_project_or_user_computer_guide_remains_discoverable(self):
+        from src.agent.skills import discover_skills
+
+        for source in ("project", "user"):
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                user_skills = root / "user-skills"
+                skill_dir = (root / ".agents/skills" if source == "project" else user_skills) / "computer-cua"
+                skill_dir.mkdir(parents=True)
+                (skill_dir / "SKILL.md").write_text(
+                    "---\nname: computer-cua\ndescription: Custom computer guide.\n---\nCustom instructions.\n",
+                )
+                catalog, _ = discover_skills(root, user_skills)
+                complete = Mock(return_value=ModelResponse("Ready."))
+                with patch("src.agent.skills.discover_skills", return_value=(catalog, [])):
+                    run_turn([{"role": "user", "content": "Open Brave."}], complete, [], root,
+                             Mock(), Mock(), computer_session_factory=Mock())
+                loader = next(tool for tool in complete.call_args.args[1] if tool["name"] == "load_skill")
+                self.assertIn("computer-cua", loader["parameters"]["properties"]["name"]["enum"])
+
     def test_screen_and_windows_survive_skill_loading_and_replace_only_same_source(self):
         for first in ("screen", "windows"):
             with self.subTest(first=first), tempfile.TemporaryDirectory() as folder:

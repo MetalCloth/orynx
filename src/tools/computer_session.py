@@ -50,6 +50,13 @@ COMPUTER_INSTRUCTIONS += (
     "verify_state reports an exact native predicate only when requested. Inspect the fresh state for the actual result. "
     "When computer_progress reports a repeated action route, change course if the goal has not advanced."
     " Key aliases are normalized by the shared Dotool driver: prefer canonical names, while common Escape/Return, arrow/page, modifier, and XKB modifier spellings are accepted."
+    " In a visibly ready launcher search field, type the grounded app name and press Enter in one sequence. "
+    "Use requested URLs or discovered links rather than guessing. "
+    "Only claim visual inspection when screenshot_included=true; use coordinates from the attached image_scope, "
+    "which may be desktop even for a window observation. "
+    "For a schema error, correct the named fields once; if that correction fails the same way, "
+    "report the limitation instead of repeating the malformed call. "
+    "Use specialized local guides such as caelestia-hyprland when their shortcuts are needed."
 )
 
 

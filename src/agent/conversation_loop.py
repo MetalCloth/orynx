@@ -130,6 +130,16 @@ def run_turn(
         available_skills, skill_problems = discover_skills(project_root)
     else:
         available_skills, skill_problems = {}, []
+    latest_user = next(
+        (message.get("content", "") for message in reversed(messages)
+         if message.get("role") == "user" and isinstance(message.get("content"), str)), "",
+    )
+    computer_guide = available_skills.get("computer-cua")
+    if (computer_tools_available and computer_guide is not None
+            and computer_guide.path == Path(__file__).resolve().parents[2] / ".agents/skills/computer-cua/SKILL.md"
+            and not re.search(r"(?<![\w-])computer-cua(?![\w-])", latest_user, re.IGNORECASE)):
+        # Built-in guidance covers this bundled guide; keep user/project alternatives discoverable.
+        available_skills = {name: skill for name, skill in available_skills.items() if name != "computer-cua"}
     loaded_skills: set[str] = set()
     loaded_servers: set[str] = set()
     limits = limits or TurnLimits()
