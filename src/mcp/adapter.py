@@ -72,27 +72,59 @@ def provider_tool(server_name: str, tool: Any) -> dict[str, Any]:
 
 
 def _remove_open_tabs_section(text: str) -> str:
-    """Drop Playwright's repeated tab preamble, retaining later result sections."""
-    output: list[str] = []
-    skipping = False
-    for line in text.splitlines(keepends=True):
-        content = line.rstrip("\r\n")
-        if skipping:
-            if _SECTION_HEADING.match(content):
-                skipping = False
-            else:
+    """Drop only Playwright's leading tab preamble, retaining page-provided text."""
+    lines = text.splitlines(keepends=True)
+    start = next(
+        (index for index, line in enumerate(lines) if line.strip()),
+        len(lines),
+    )
+    if start == len(lines) or lines[start].rstrip("\r\n") != _OPEN_TABS_HEADING:
+        return text
+    end = next(
+        (
+            index
+            for index in range(start + 1, len(lines))
+            if _SECTION_HEADING.match(lines[index].rstrip("\r\n"))
+        ),
+        len(lines),
+    )
+    return "".join(lines[:start] + lines[end:])
+
+
+def _has_aria_hidden_attribute(line: str) -> bool:
+    """Match snapshot attributes outside quoted role names and YAML text values."""
+    quote: str | None = None
+    index = 0
+    while index < len(line):
+        char = line[index]
+        if quote == '"':
+            if char == "\\":
+                index += 2
                 continue
-        if content == _OPEN_TABS_HEADING:
-            skipping = True
-            continue
-        output.append(line)
-    return "".join(output)
+            if char == '"':
+                quote = None
+        elif quote == "'":
+            if char == "'":
+                if index + 1 < len(line) and line[index + 1] == "'":
+                    index += 2
+                    continue
+                quote = None
+        elif char in {'"', "'"}:
+            quote = char
+        elif char == ":":
+            # In Playwright snapshots, a colon ends the node's role/attribute header;
+            # anything following it is a YAML text value, not node metadata.
+            return False
+        elif char == "[" and _ARIA_HIDDEN_NODE.match(line, index):
+            return True
+        index += 1
+    return False
 
 
-def _filter_aria_hidden_yaml(lines: list[str]) -> list[str]:
+def _filter_aria_hidden_yaml(lines: list[str], *, fenced: bool = True) -> list[str]:
     """Remove marked YAML nodes and their indented descendants from a snapshot."""
     output: list[str] = []
-    in_yaml = False
+    in_yaml = not fenced
     hidden_indent: int | None = None
     yaml_fences = {f"{_CODE_FENCE}yaml", f"{_CODE_FENCE}yml"}
     for line in lines:
@@ -103,7 +135,7 @@ def _filter_aria_hidden_yaml(lines: list[str]) -> list[str]:
                 in_yaml = True
             output.append(line)
             continue
-        if stripped == _CODE_FENCE:
+        if fenced and stripped == _CODE_FENCE:
             in_yaml = False
             hidden_indent = None
             output.append(line)
@@ -115,11 +147,25 @@ def _filter_aria_hidden_yaml(lines: list[str]) -> list[str]:
             if indent > hidden_indent:
                 continue
             hidden_indent = None
-        if content.lstrip().startswith("- ") and _ARIA_HIDDEN_NODE.search(content):
+        if content.lstrip().startswith("- ") and _has_aria_hidden_attribute(content):
             hidden_indent = len(content) - len(content.lstrip(" "))
             continue
         output.append(line)
     return output
+
+
+def _filter_find_result(text: str) -> str:
+    """Remove hidden nodes from browser_find's unfenced snapshot-tree fragment."""
+    lines = text.splitlines(keepends=True)
+    tree_start = next(
+        (index for index, line in enumerate(lines) if line.lstrip().startswith("- ")),
+        len(lines),
+    )
+    if tree_start == len(lines):
+        return text
+    return "".join(
+        lines[:tree_start] + _filter_aria_hidden_yaml(lines[tree_start:], fenced=False)
+    )
 
 
 def _filter_snapshot_sections(text: str) -> str:
@@ -173,4 +219,6 @@ def result_text(
         )
         if not is_scoped_snapshot:
             text = _filter_snapshot_sections(text)
+            if tool_name == "browser_find":
+                text = _filter_find_result(text)
     return text

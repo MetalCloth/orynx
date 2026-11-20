@@ -730,6 +730,72 @@ for line in sys.stdin:
         self.assertIn("Hidden control", scoped)
         self.assertIn("Visible control", scoped)
 
+    def test_playwright_snapshot_cleanup_keeps_literal_aria_hidden_text(self):
+        raw = (
+            "### Snapshot\n"
+            "```yaml\n"
+            "- text: 'The docs mention [aria-hidden=\"true\"] as an example.'\n"
+            "- generic \"The literal [aria-hidden=\\\"true\\\"] text\" [ref=e1]\n"
+            "- generic [aria-hidden=\"true\"] [ref=e2]:\n"
+            "  - button \"Actually hidden\" [ref=e3]\n"
+            "- button \"Visible control\" [ref=e4]\n"
+            "```\n"
+        )
+        result = SimpleNamespace(
+            content=[SimpleNamespace(text=raw)],
+            structured_content=None,
+            is_error=False,
+        )
+
+        cleaned = result_text(
+            result, server_name="playwright", tool_name="browser_snapshot", arguments={}
+        )
+        self.assertIn('[aria-hidden="true"] as an example.', cleaned)
+        self.assertIn('The literal [aria-hidden=\\"true\\"] text', cleaned)
+        self.assertNotIn("Actually hidden", cleaned)
+        self.assertIn("Visible control", cleaned)
+
+    def test_playwright_find_cleanup_removes_hidden_matches(self):
+        raw = (
+            'Found 1 match for "Hidden control":\n\n'
+            '- main [ref=e1]:\n'
+            '  - generic [aria-hidden] [ref=e2]:\n'
+            '    - button "Hidden control" [ref=e3]\n'
+            '- button "Visible control" [ref=e4]\n'
+        )
+        result = SimpleNamespace(
+            content=[SimpleNamespace(text=raw)],
+            structured_content=None,
+            is_error=False,
+        )
+
+        cleaned = result_text(
+            result, server_name="playwright", tool_name="browser_find", arguments={}
+        )
+        self.assertIn('Found 1 match for "Hidden control":', cleaned)
+        self.assertNotIn('button "Hidden control"', cleaned)
+        self.assertIn("Visible control", cleaned)
+
+    def test_playwright_cleanup_keeps_nonleading_open_tabs_heading(self):
+        raw = (
+            "### Result\n"
+            "Page content before the literal heading.\n"
+            "### Open tabs\n"
+            "This heading is part of the page result.\n"
+            "### End\n"
+            "Remaining result content.\n"
+        )
+        result = SimpleNamespace(
+            content=[SimpleNamespace(text=raw)],
+            structured_content=None,
+            is_error=False,
+        )
+
+        cleaned = result_text(
+            result, server_name="playwright", tool_name="browser_evaluate", arguments={}
+        )
+        self.assertEqual(cleaned, raw)
+
     def test_playwright_cleanup_leaves_tab_list_other_servers_and_errors_alone(self):
         fence = "```"
         raw = (
