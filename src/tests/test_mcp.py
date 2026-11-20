@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 import httpx2
 
 from src.agent.conversation_loop import run_turn
-from src.mcp.adapter import provider_tool
+from src.mcp.adapter import provider_tool, result_text
 from src.mcp.client import MCPClient
 from src.mcp.discovery import (
     MCPServerConfig,
@@ -60,6 +60,23 @@ class MCPTests(unittest.TestCase):
         self.assertTrue(client.requires_approval("mcp__playwright__browser_click"))
         self.assertFalse(client.requires_approval("mcp__playwright__browser_snapshot"))
         self.assertEqual(client.tool_environment("mcp__playwright__browser_snapshot"), "local_desktop")
+
+    def test_local_playwright_tab_policy_approves_only_reads_and_safe_new_urls(self):
+        client = MCPClient(configs=[])
+        name = "mcp__playwright__browser_tabs"
+        client._bindings[name] = ("playwright", "browser_tabs", Mock())
+
+        self.assertFalse(client.requires_approval(name, {"action": "list"}))
+        self.assertFalse(client.requires_approval(name, {
+            "action": "new", "url": "https://8.8.8.8/",
+        }))
+        self.assertTrue(client.requires_approval(name, {
+            "action": "new", "url": "http://127.0.0.1:8931/",
+        }))
+        self.assertTrue(client.requires_approval(name, {"action": "new"}))
+        self.assertTrue(client.requires_approval(name, {"action": "select", "index": 0}))
+        self.assertTrue(client.requires_approval(name, {"action": "close", "index": 0}))
+        self.assertTrue(client.requires_approval(name, {"action": "unexpected"}))
 
     def test_brave_endpoint_uses_current_devtools_websocket_and_fails_closed(self):
         from src.mcp.playwright_brave import brave_cdp_endpoint
@@ -669,6 +686,123 @@ for line in sys.stdin:
         malformed = SimpleNamespace(name="bad_schema", input_schema=["not", "an object"])
         with self.assertRaisesRegex(ValueError, "unsupported input schema"):
             provider_tool("fake", malformed)
+
+    def test_playwright_snapshot_cleanup_keeps_a_scoped_hidden_content_escape_hatch(self):
+        fence = "```"
+        raw = (
+            "### Open tabs\n"
+            "- 0: Fixture — http://127.0.0.1:8931/\n\n"
+            "### Snapshot\n"
+            f"{fence}yaml\n"
+            "- main [ref=e1]:\n"
+            "  - generic [aria-hidden=\"true\"] [ref=e2]:\n"
+            "    - button \"Hidden control\" [ref=e3]\n"
+            "  - button \"Visible control\" [ref=e4]\n"
+            "  - generic [aria-hidden=\"false\"] [ref=e5]\n"
+            f"{fence}\n"
+            "### URL\n"
+            "http://127.0.0.1:8931/\n"
+        )
+        result = SimpleNamespace(
+            content=[SimpleNamespace(text=raw)],
+            structured_content=None,
+            is_error=False,
+        )
+
+        default = result_text(
+            result, server_name="playwright", tool_name="browser_snapshot", arguments={}
+        )
+        self.assertNotIn("### Open tabs", default)
+        self.assertNotIn("Hidden control", default)
+        self.assertNotIn("[aria-hidden=\"true\"]", default)
+        self.assertIn("Visible control", default)
+        self.assertIn("[aria-hidden=\"false\"]", default)
+        self.assertIn("### URL", default)
+        self.assertLess(len(default.encode("utf-8")), len(raw.encode("utf-8")))
+
+        scoped = result_text(
+            result,
+            server_name="playwright",
+            tool_name="browser_snapshot",
+            arguments={"target": "main"},
+        )
+        self.assertNotIn("### Open tabs", scoped)
+        self.assertIn("Hidden control", scoped)
+        self.assertIn("Visible control", scoped)
+
+    def test_playwright_cleanup_leaves_tab_list_other_servers_and_errors_alone(self):
+        fence = "```"
+        raw = (
+            "### Open tabs\n- 0: Fixture\n"
+            "### Snapshot\n"
+            f"{fence}yaml\n"
+            "- generic [aria-hidden]:\n"
+            "  - button \"Hidden\"\n"
+            f"{fence}\n"
+        )
+        result = SimpleNamespace(
+            content=[SimpleNamespace(text=raw)],
+            structured_content=None,
+            is_error=False,
+        )
+        self.assertEqual(
+            result_text(result, server_name="playwright", tool_name="browser_tabs"),
+            raw,
+        )
+        self.assertEqual(result_text(result, server_name="other"), raw)
+
+        error = SimpleNamespace(
+            content=[SimpleNamespace(text=raw)],
+            structured_content=None,
+            is_error=True,
+        )
+        self.assertEqual(
+            result_text(error, server_name="playwright", tool_name="browser_snapshot"),
+            f"MCP server reported a tool error:\n{raw}",
+        )
+
+    def test_playwright_snapshot_tool_description_explains_scoped_inspection(self):
+        tool = SimpleNamespace(
+            name="browser_snapshot",
+            description="Read the current page snapshot.",
+            title="",
+            input_schema={"type": "object", "properties": {}},
+        )
+        description = provider_tool("playwright", tool)["description"]
+        self.assertIn("aria-hidden", description)
+        self.assertIn("target", description)
+        self.assertIn("preserve", description)
+        self.assertNotIn("aria-hidden", provider_tool("fake", tool)["description"])
+
+    def test_playwright_call_tool_preserves_hidden_content_for_an_explicit_target(self):
+        fence = "```"
+        raw = (
+            "### Open tabs\n- 0: Fixture\n"
+            "### Snapshot\n"
+            f"{fence}yaml\n"
+            "- main [ref=e1]:\n"
+            "  - generic [aria-hidden=\"true\"]:\n"
+            "    - button \"Hidden control\"\n"
+            f"{fence}\n"
+        )
+        result = SimpleNamespace(
+            content=[SimpleNamespace(text=raw)],
+            structured_content=None,
+            is_error=False,
+        )
+        name = "mcp__playwright__browser_snapshot"
+        client = MCPClient(configs=[])
+        client.start = Mock()
+        client._loop = Mock()
+        client._bindings[name] = ("playwright", "browser_snapshot", Mock())
+        future = Mock()
+        future.result.return_value = result
+
+        with patch("src.mcp.client.asyncio.run_coroutine_threadsafe", return_value=future):
+            output = client.call_tool(name, {"target": "main"})
+
+        self.assertNotIn("### Open tabs", output)
+        self.assertIn("Hidden control", output)
 
     def test_duplicate_tool_names_are_registered_once(self):
         tool = SimpleNamespace(

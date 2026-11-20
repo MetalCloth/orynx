@@ -23,7 +23,7 @@ from src.providers.types import retry_after_seconds
 
 
 _SAFE_PLAYWRIGHT_TOOLS = {
-    "browser_navigate", "browser_snapshot", "browser_tabs", "browser_go_back",
+    "browser_navigate", "browser_snapshot", "browser_go_back",
     "browser_go_forward", "browser_reload", "browser_wait_for",
     "browser_console_messages", "browser_network_requests", "browser_network_request",
     "browser_navigate_back", "browser_find",
@@ -251,9 +251,16 @@ class MCPClient:
             if server_name in {"github", "context7", "microsoft_learn", "tavily"}:
                 return False
             return provider_name not in self._read_only_tools
+        args = arguments or {}
+        if tool_name == "browser_tabs":
+            action = args.get("action")
+            if action == "list":
+                return False
+            if action == "new":
+                return self._private_or_unverified_url(args.get("url"))
+            return True
         if tool_name not in _SAFE_PLAYWRIGHT_TOOLS:
             return True
-        args = arguments or {}
         navigates = tool_name == "browser_navigate"
         return navigates and self._private_or_unverified_url(args.get("url"))
 
@@ -335,7 +342,12 @@ class MCPClient:
                         )
                     try:
                         result = future.result(timeout=min(0.2, remaining))
-                        return result_text(result)
+                        return result_text(
+                            result,
+                            server_name=server_name,
+                            tool_name=tool_name,
+                            arguments=arguments,
+                        )
                     except TimeoutError:
                         if future.done():
                             raise
