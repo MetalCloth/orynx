@@ -37,18 +37,16 @@ case "$mode" in
         fi
         if (($#)); then
             log_file="$1"
-        else
-            shopt -s nullglob
-            log_files=("$logs_dir"/computer-*.jsonl)
-            if ((${#log_files[@]} == 0)); then
-                echo "No computer logs yet. Start Oryn with: $0 run" >&2
-                exit 1
+            if [[ "$raw" == true ]]; then
+                exec tail -n +1 -F -- "$log_file"
             fi
-            log_file="$(printf '%s\n' "${log_files[@]}" | sort | tail -n 1)"
+            tail -n +1 -F -- "$log_file" | python3 -u "$repo_dir/scripts/computer_log_view.py"
+        else
+            follow_args=(--follow-latest "$logs_dir")
+            if [[ "$raw" == true ]]; then
+                follow_args+=(--raw)
+            fi
+            exec python3 -u "$repo_dir/scripts/computer_log_view.py" "${follow_args[@]}"
         fi
-        if [[ "$raw" == true ]]; then
-            exec tail -n +1 -F -- "$log_file"
-        fi
-        tail -n +1 -F -- "$log_file" | python3 -u "$repo_dir/scripts/computer_log_view.py"
         ;;
 esac

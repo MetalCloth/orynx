@@ -6,12 +6,14 @@ import os
 import re
 import shlex
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 IST = timezone(timedelta(hours=5, minutes=30), name="IST")
+RUN_LOG_NAME = re.compile(r"computer-(\d{8}T\d{6}Z)-(\d+)\.jsonl\Z")
 
 
 def _short(value: object, limit: int = 240) -> str:
@@ -501,8 +503,82 @@ def format_record(record: dict) -> str:
     return f"{stamp}  {event.replace('_', ' ').upper()} · {fields}".rstrip(" ·")
 
 
+def _latest_run_log(logs_dir: Path) -> Path | None:
+    candidates = []
+    for path in logs_dir.glob("computer-*.jsonl"):
+        match = RUN_LOG_NAME.fullmatch(path.name)
+        if match:
+            candidates.append((match.group(1), int(match.group(2)), path))
+    return max(candidates)[2] if candidates else None
+
+
+def _follow_latest(logs_dir: Path):
+    current_path = None
+    current_file = None
+    while True:
+        if current_file is not None:
+            line = current_file.readline()
+            if line:
+                yield line
+                continue
+            try:
+                if current_file.tell() > current_path.stat().st_size:
+                    current_file.seek(0)
+            except OSError:
+                pass
+
+        latest = _latest_run_log(logs_dir)
+        if latest is not None and latest != current_path:
+            try:
+                next_file = latest.open("r", encoding="utf-8")
+            except OSError:
+                if current_file is not None:
+                    current_file.close()
+                current_path = None
+                current_file = None
+            else:
+                if current_file is not None:
+                    current_file.close()
+                current_file = next_file
+                current_path = latest
+                match = RUN_LOG_NAME.fullmatch(latest.name)
+                try:
+                    started = datetime.strptime(match.group(1), "%Y%m%dT%H%M%SZ")
+                    started = started.replace(tzinfo=timezone.utc).astimezone(IST)
+                    started_text = started.strftime("%Y-%m-%d %H:%M:%S IST")
+                except (AttributeError, ValueError):
+                    started_text = "unknown time"
+                print(
+                    f"Following latest run · started {started_text}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        time.sleep(0.2)
+
+
 def main() -> None:
-    for line in sys.stdin:
+    args = sys.argv[1:]
+    raw = False
+    lines = sys.stdin
+    if args:
+        invalid = (
+            len(args) not in {2, 3}
+            or args[0] != "--follow-latest"
+            or (len(args) == 3 and args[2] != "--raw")
+        )
+        if invalid:
+            raise SystemExit("usage: computer_log_view.py [--follow-latest LOGS_DIR [--raw]]")
+        logs_dir = Path(args[1])
+        if _latest_run_log(logs_dir) is None:
+            print("No computer run logs yet. Start Oryn with: ./scripts/computer-log.sh run", file=sys.stderr)
+            raise SystemExit(1)
+        raw = len(args) == 3
+        lines = _follow_latest(logs_dir)
+
+    for line in lines:
+        if raw:
+            print(line, end="", flush=True)
+            continue
         try:
             record = json.loads(line)
         except json.JSONDecodeError:

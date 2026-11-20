@@ -31,8 +31,10 @@ silent recordings are detected locally and are not sent to ElevenLabs.
 
 ## What a trace connects
 
-The JSONL file is the detailed record. `./scripts/computer-log.sh follow` renders it as a
-timestamped, sequence-numbered terminal view, with color when connected to a terminal.
+The JSONL file is the detailed record. `./scripts/computer-log.sh follow` renders the newest
+timestamped run as a sequence-numbered terminal view, with color when connected to a terminal.
+It ignores archived `computer-retained-*.jsonl` files and switches to a newer run if one starts
+while the viewer is open. It prints each run's start time in IST when it switches.
 `NO_COLOR=1` disables color. `./scripts/computer-log.sh follow --raw` shows the raw records.
 The readable view shows dates and times in IST (UTC+05:30), including older traces. Raw
 records keep `time_utc`, and log filenames use UTC, so elapsed-time calculations and
