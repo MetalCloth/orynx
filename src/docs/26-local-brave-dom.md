@@ -41,4 +41,10 @@ Validation covers endpoint parsing, service reuse across Oryn restarts, one-time
 
 The first reconnect after installing authentication replaces the older unprotected service once. This can trigger one new Brave consent prompt. Normal Oryn reconnects then reuse the authenticated service.
 
-Authentication validation confirmed HTTP 401 for missing/wrong tokens, HTTP 403 for browser Origin headers, and successful MCP discovery of 22 tools with the token. The replacement connection's tab-read attempt timed out while opening Brave's debugging WebSocket; a browser read after this authentication upgrade remains unconfirmed. The anchor now rejects the adapter's `MCP server reported a tool error:` prefix as failure instead of logging a false connection success. It does not retry automatically.
+Authentication validation confirmed HTTP 401 for missing/wrong tokens, HTTP 403 for browser Origin headers, and successful MCP discovery of 22 tools with the token. An earlier replacement connection timed out while opening Brave's debugging WebSocket. The anchor rejects the adapter's `MCP server reported a tool error:` prefix as failure instead of logging a false connection success. It does not retry automatically.
+
+The follow-up live check on 2026-11-20 succeeded through the authenticated bridge: Oryn listed 10 existing Brave tabs and read the current page's accessibility snapshot. After that client exited, a separate Python process connected and repeated both reads successfully. The bridge retained the same service PID and credential after both clients disconnected. The earlier timeout did not reproduce, so its cause remains unconfirmed. These checks did not navigate, switch tabs, click, type, or change page settings; page-changing actions and a Brave restart were not tested in this follow-up.
+
+The user subsequently reported repeated Allow prompts. Whether these were Brave's debugging prompts or Codex command approvals remains unconfirmed. Reusing a service PID and credential does not prove that browser approval persists across normal Oryn turns; that experience remains an open validation item.
+
+The full Python suite passed all 277 tests, including the bridge lifecycle and HTTP authentication checks; all six offline evaluations passed. The hosted-preset test now excludes the local Playwright HTTP connection when counting the nine hosted services.

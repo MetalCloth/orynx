@@ -38,7 +38,7 @@ Oryn is an educational local coding assistant. Its model runs remotely, while it
 | [Computer-use cheat sheet](23-computer-use-cheat-sheet.md) | The tools, observation modes, CUA reads, IDs, action outcomes, and saved history in one place |
 | [Proposed computer execution redesign](24-computer-execution-redesign.md) | Current capabilities versus the proposed conditional executor, perception sources, and how to evaluate the first experiment |
 | [Local browser DOM research and decision](25-local-browser-dom-research.md) | Playwright MCP versus Browser Use, browser accessibility snapshots, and Oryn's local Brave connection design |
-| [Local Brave browser setup](26-local-brave-dom.md) | Playwright MCP controls, Brave CDP attachment, approval behavior, and remaining validation |
+| [Local Brave browser setup](26-local-brave-dom.md) | Playwright MCP controls, authenticated Brave attachment, approval behavior, and verified reconnects |
 | [Manual smoke checklist](smoke-checklist.md) | A practical end-to-end checklist for the terminal and dashboard |
 
 ## Choose a reading path

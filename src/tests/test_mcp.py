@@ -390,7 +390,7 @@ class MCPTests(unittest.TestCase):
             self.assertEqual(load_enabled_servers(path), {"context7"})
         with patch("src.mcp.discovery.local_secret", return_value="test-secret"):
             configs = server_configs(set(SERVER_NAMES))
-        hosted = [config for config in configs if config.url]
+        hosted = [config for config in configs if config.url and config.name != "playwright"]
         self.assertEqual(len(hosted), 9)
         self.assertTrue(all(config.url.startswith("https://") and not config.command for config in hosted))
         self.assertTrue(all("test-secret" not in config.url and "test-secret" not in repr(config) for config in hosted))
