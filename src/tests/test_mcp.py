@@ -8,7 +8,7 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx2
 
@@ -290,6 +290,7 @@ class MCPTests(unittest.TestCase):
         for server, hinted_read, failure, retries in scenarios:
             client = MCPClient(configs=[])
             client.start = Mock()
+            client._call_with_page_state = Mock(return_value=None)
             client._call_local_browser = Mock()
             client._loop = Mock()
             name = f"mcp__{server}__action"
@@ -300,8 +301,7 @@ class MCPTests(unittest.TestCase):
             notices = []
             try:
                 with patch("src.mcp.client.asyncio.run_coroutine_threadsafe",
-                           side_effect=[ready(failure), ready("result")]) as schedule, \
-                     patch("src.mcp.client.result_text", return_value="Read result"), \
+                           side_effect=[ready(failure), ready("Read result")]) as schedule, \
                      patch.object(stop, "wait", return_value=False) as wait:
                     if retries:
                         self.assertEqual(client.call_tool(name, {}, stop, lambda n, d: notices.append((n, d))),
@@ -320,6 +320,7 @@ class MCPTests(unittest.TestCase):
 
         client = MCPClient(configs=[])
         client.start = Mock()
+        client._call_with_page_state = Mock(return_value=None)
         client._loop = Mock()
         client._bindings["mcp__github__read"] = ("github", "read", Mock())
         stop = threading.Event()
@@ -856,19 +857,75 @@ for line in sys.stdin:
             structured_content=None,
             is_error=False,
         )
-        name = "mcp__playwright__browser_snapshot"
         client = MCPClient(configs=[])
-        client.start = Mock()
-        client._loop = Mock()
-        client._bindings[name] = ("playwright", "browser_snapshot", Mock())
-        future = Mock()
-        future.result.return_value = result
-
-        with patch("src.mcp.client.asyncio.run_coroutine_threadsafe", return_value=future):
-            output = client.call_tool(name, {"target": "main"})
+        server = SimpleNamespace(call_tool=AsyncMock(return_value=result))
+        output = asyncio.run(client._call_with_page_state(
+            server, "playwright", "browser_snapshot", {"target": "main"},
+        ))
 
         self.assertNotIn("### Open tabs", output)
         self.assertIn("Hidden control", output)
+
+    def test_playwright_linked_action_snapshot_is_refreshed_without_repeating_action(self):
+        action = SimpleNamespace(content=[SimpleNamespace(text=(
+            "### Ran Playwright code\n```js\nawait button.click();\n```\n"
+            "### Snapshot\n- [Snapshot](page.yml)\n"
+        ))], structured_content=None, is_error=False)
+        snapshot = SimpleNamespace(content=[SimpleNamespace(text=(
+            "### Open tabs\n- 0: Private tab\n### Snapshot\n```yaml\n"
+            '- button "Updated state" [ref=e2]\n'
+            '- generic [aria-hidden]:\n  - text: Hidden content\n```\n'
+        ))], structured_content=None, is_error=False)
+        client = MCPClient(configs=[])
+        server = SimpleNamespace(call_tool=AsyncMock(side_effect=[action, snapshot]))
+        output = asyncio.run(client._call_with_page_state(
+            server, "playwright", "browser_click", {"target": "e1"},
+        ))
+        self.assertIn("await button.click()", output)
+        self.assertIn('button "Updated state"', output)
+        self.assertNotIn("Hidden content", output)
+        self.assertNotIn("Private tab", output)
+        self.assertEqual(server.call_tool.call_args_list, [
+            unittest.mock.call("browser_click", {"target": "e1"}),
+            unittest.mock.call("browser_snapshot", {}),
+        ])
+
+        error = SimpleNamespace(
+            content=[SimpleNamespace(text="failed")], structured_content=None, is_error=True,
+        )
+        for failure in (ConnectionError("offline"), TimeoutError(), error, action):
+            with self.subTest(failure=type(failure).__name__):
+                server.call_tool = AsyncMock(side_effect=[action, failure])
+                output = asyncio.run(client._call_with_page_state(
+                    server, "playwright", "browser_click", {"target": "e1"},
+                ))
+                self.assertIn("await button.click()", output)
+                self.assertIn("Do not repeat the action", output)
+                self.assertEqual(server.call_tool.await_count, 2)
+
+        for server_name, name, result in (
+            ("playwright", "browser_click", snapshot),
+            ("playwright", "browser_snapshot", action),
+            ("playwright", "browser_find", action),
+            ("playwright", "browser_click", error),
+            ("other", "browser_click", action),
+        ):
+            with self.subTest(tool=name):
+                server.call_tool = AsyncMock(return_value=result)
+                asyncio.run(client._call_with_page_state(server, server_name, name, {}))
+                self.assertEqual(server.call_tool.await_count, 1)
+
+        server.call_tool = AsyncMock(return_value=action)
+        output = asyncio.run(client._call_with_page_state(
+            server, "playwright", "browser_click", {}, deadline=0.1,
+        ))
+        self.assertIn("Do not repeat the action", output)
+        self.assertEqual(server.call_tool.await_count, 1)
+
+        server.call_tool = AsyncMock(side_effect=[action, asyncio.CancelledError()])
+        with self.assertRaises(asyncio.CancelledError):
+            asyncio.run(client._call_with_page_state(server, "playwright", "browser_click", {}))
+        self.assertEqual(server.call_tool.await_count, 2)
 
     def test_duplicate_tool_names_are_registered_once(self):
         tool = SimpleNamespace(
@@ -1033,6 +1090,7 @@ for line in sys.stdin:
                 yield
 
         client = MCPClient([])
+        client._call_with_page_state = Mock(return_value=None)
         client._loop = object()
         client._bindings["mcp__context7__slow"] = ("context7", "slow", SlowClient())
         future = PendingFuture()

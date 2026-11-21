@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 
 import httpx2
 
-from src.mcp.adapter import provider_tool, provider_tool_name, result_text
+from src.mcp.adapter import has_linked_snapshot, provider_tool, provider_tool_name, result_text
 from src.mcp.discovery import MCPServerConfig, PLAYWRIGHT_SERVERS, SERVER_NAMES, server_configs
 from src.mcp.playwright_bridge import BRIDGE_URL, bridge_headers, ensure_playwright_bridge, stop_playwright_bridge
 from src.providers.types import retry_after_seconds
@@ -302,6 +302,38 @@ class MCPClient:
         except (OSError, ValueError):
             return True
 
+    async def _call_with_page_state(
+        self, client: Any, server_name: str, tool_name: str, arguments: dict[str, Any],
+        deadline: float | None = None,
+    ) -> str:
+        result = await client.call_tool(tool_name, arguments)
+        text = result_text(
+            result, server_name=server_name, tool_name=tool_name, arguments=arguments,
+        )
+        if (server_name not in PLAYWRIGHT_SERVERS or result.is_error
+                or tool_name in {"browser_snapshot", "browser_find"}
+                or not has_linked_snapshot(text)):
+            return text
+        try:
+            budget = min(10, max(0, deadline - time.monotonic() - 0.5)) if deadline else 10
+            if not budget:
+                raise TimeoutError
+            snapshot = await asyncio.wait_for(client.call_tool("browser_snapshot", {}), timeout=budget)
+            if snapshot.is_error:
+                raise RuntimeError("Snapshot tool reported an error.")
+            observation = result_text(
+                snapshot, server_name=server_name, tool_name="browser_snapshot", arguments={},
+            )
+            if "### Snapshot\n```yaml\n" not in observation.replace("\r\n", "\n"):
+                raise RuntimeError("Snapshot tool did not return an inline tree.")
+        except Exception:
+            # The original action already returned; a failed observation must not erase it.
+            return text + (
+                "\n\nOryn could not refresh the page snapshot after this tool returned. "
+                "Do not repeat the action to obtain page state; call browser_snapshot to inspect it."
+            )
+        return text + "\n\n### Oryn current page observation\n" + observation
+
     def call_tool(
         self, provider_name: str, arguments: dict[str, Any], cancel_event: threading.Event | None = None,
         on_retry: Callable[[int, float], None] | None = None,
@@ -326,7 +358,7 @@ class MCPClient:
             if stop.is_set():
                 raise InterruptedError("MCP tool call cancelled.")
             future = asyncio.run_coroutine_threadsafe(
-                client.call_tool(tool_name, arguments), self._loop
+                self._call_with_page_state(client, server_name, tool_name, arguments, deadline), self._loop
             )
             try:
                 while True:
@@ -341,13 +373,7 @@ class MCPClient:
                             "Inspect external state before repeating an action."
                         )
                     try:
-                        result = future.result(timeout=min(0.2, remaining))
-                        return result_text(
-                            result,
-                            server_name=server_name,
-                            tool_name=tool_name,
-                            arguments=arguments,
-                        )
+                        return future.result(timeout=min(0.2, remaining))
                     except TimeoutError:
                         if future.done():
                             raise

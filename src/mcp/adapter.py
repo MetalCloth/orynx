@@ -16,6 +16,15 @@ _OPEN_TABS_HEADING = "### Open tabs"
 _CODE_FENCE = "```"
 
 
+def has_linked_snapshot(text: str) -> bool:
+    """Recognize the pinned MCP's snapshot artifact section."""
+    return re.search(
+        r"^### Snapshot\r?\n- \[Snapshot\]\([^\r\n]+\)(?:\r?\n|$)",
+        text,
+        re.MULTILINE,
+    ) is not None
+
+
 def mcp_loader_tool(directory: list[dict[str, Any]]) -> dict[str, Any]:
     """Advertise a compact service directory instead of every MCP function schema."""
     return {
