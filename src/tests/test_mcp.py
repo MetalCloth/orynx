@@ -827,6 +827,7 @@ for line in sys.stdin:
             result_text(error, server_name="playwright", tool_name="browser_snapshot"),
             f"MCP server reported a tool error:\n{raw}",
         )
+        self.assertFalse(result_text(error).success)
 
     def test_playwright_snapshot_tool_description_explains_scoped_inspection(self):
         tool = SimpleNamespace(

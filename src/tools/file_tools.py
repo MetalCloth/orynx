@@ -11,6 +11,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from src.tools.results import ToolResult
+
 
 _PRIVATE_PARTS = (".git", ".venv", "node_modules", "__pycache__", ".codex", ".mini-hermes", ".ssh", "firecrawl.env", "tavily.env", "mcp.env")
 MAX_UNDO_HISTORY = 20
@@ -233,7 +235,7 @@ def write_file(
     previous_content = target.read_bytes() if exists else None
     relative_path = target.relative_to(root).as_posix()
     if not confirm(relative_path, content, exists):
-        return f"Write cancelled; '{relative_path}' was not changed."
+        return ToolResult(f"Write cancelled; '{relative_path}' was not changed.", success=False)
 
     if exists:
         if target.is_symlink() or not target.is_file() or target.read_bytes() != previous_content:
@@ -316,7 +318,7 @@ def edit_file(
     if len(preview) > 20_000:
         raise ValueError("This edit is too large to review safely. Split it into smaller edits.")
     if not confirm(relative_path, preview):
-        return f"Edit cancelled; '{relative_path}' was not changed."
+        return ToolResult(f"Edit cancelled; '{relative_path}' was not changed.", success=False)
 
     # Recheck after approval so an intervening change cannot be silently overwritten.
     if target.read_bytes() != original_bytes:
@@ -367,7 +369,7 @@ def undo_file_change(
         preview = preview[:19_800] + "\n[Undo preview truncated; the full file will be restored.]\n"
     removes_created_file = change.previous_content is None
     if not confirm(change.path, preview, removes_created_file):
-        return f"Undo cancelled; '{change.path}' was not changed."
+        return ToolResult(f"Undo cancelled; '{change.path}' was not changed.", success=False)
 
     # Recheck after approval so an intervening edit is never overwritten.
     if target.is_symlink() or target.read_bytes() != current_content:

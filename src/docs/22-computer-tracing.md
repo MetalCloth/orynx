@@ -23,6 +23,14 @@ Computer tool results can carry up to 40,000 characters into the current model t
 other tool results retain the 20,000-character cap. The script applies the same computer
 result cap to its default JSON output.
 
+Tool diagnostics use exceptions and explicit execution status, rather than searching output
+for words such as "cancelled", "denied", or "Tool error:". MCP error flags, terminal exit
+codes/timeouts, approval denials, worker status, and unsupported tools feed that status.
+Desktop actions also record `action_effect` (for example, `sent`, `refused`, or `unknown`);
+`sent` describes input delivery and does not prove the task succeeded. Refused or uncertain
+actions have `success:false` while retaining that distinct effect. Older logs keep their
+original flags and may therefore contain misleading success or failure counts.
+
 When voice input is used under `computer-log.sh run`, the same JSONL file records recording
 start/stop, sample rate, selected input and host API names, audio byte count and duration,
 peak/RMS signal levels, capture-overflow status, transcription time, transcript length, and a

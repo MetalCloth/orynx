@@ -20,6 +20,7 @@ from src.tools.browser_tools import BrowserSession, FirecrawlHTTPError
 from src.tools.computer_session import COMPUTER_INSTRUCTIONS, ComputerResult, ComputerSession, computer_tool_schemas
 from src.tools.file_tools import FileChange
 from src.tools.registry import execute_tool, tool_schemas
+from src.tools.results import ToolResult
 from src.tools.terminal_tool import TerminalJobManager
 
 
@@ -491,7 +492,10 @@ def run_turn(
                             elapsed_ms=usage.get("elapsed_ms", 0), tool_count=usage.get("tool_calls", 0),
                             model_requests=usage.get("model_requests", 0),
                         )
-                        result = json.dumps(worker_result, ensure_ascii=False)
+                        result = ToolResult(
+                            json.dumps(worker_result, ensure_ascii=False),
+                            success=worker_result.get("status") == "completed",
+                        )
                     elif call.name == "load_mcp_tools":
                         if mcp_client is None:
                             raise RuntimeError("MCP loading is unavailable without an active MCP client.")
@@ -523,7 +527,9 @@ def run_turn(
                             if len(preview) > 12_000:
                                 raise ValueError("MCP action arguments are too large to review safely.")
                             if not confirm_mcp(call.name, preview):
-                                result = "The user denied this MCP action; it was not run."
+                                result = ToolResult(
+                                    "The user denied this MCP action; it was not run.", success=False,
+                                )
                             else:
                                 check_cancelled()
                                 result = call_mcp(call)
@@ -575,17 +581,12 @@ def run_turn(
                             **({"upstream_detail": exc.detail} if exc.detail else {}),
                         }
                     result = f"Tool error: {exc}. Correct the arguments or try another approach."
+                tool_succeeded = tool_error_class is None and getattr(result, "success", True)
+                action_effect = result.action_effect if isinstance(result, ComputerResult) else None
                 result_images = result.images if isinstance(result, ComputerResult) else []
                 history_text = result.history_text if isinstance(result, ComputerResult) else None
                 observation_scope = result.observation_scope if isinstance(result, ComputerResult) else None
                 result = result.text if isinstance(result, ComputerResult) else result
-                result_lower = result.casefold()
-                tool_succeeded = (
-                    tool_error_class is None
-                    and not result_lower.startswith("tool error:")
-                    and "cancelled" not in result_lower
-                    and "denied" not in result_lower
-                )
                 result_limit = (
                     MAX_COMPUTER_TOOL_RESULT_CHARS if call.name.startswith("computer_")
                     else MAX_TOOL_RESULT_CHARS
@@ -616,6 +617,7 @@ def run_turn(
                     "tool_end", tool_name=diagnostic_tool_name, success=tool_succeeded,
                     elapsed_ms=round((time.monotonic() - tool_started) * 1000),
                     **({"error_class": tool_error_class} if tool_error_class else {}),
+                    **({"action_effect": action_effect} if action_effect else {}),
                     **upstream_metadata,
                 )
                 if on_tool_event:

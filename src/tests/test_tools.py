@@ -3,8 +3,10 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 
@@ -17,6 +19,22 @@ from src.tools.web_tools import _firecrawl_extract, _tavily_api_key, web_extract
 
 
 class ToolTests(unittest.TestCase):
+    def test_terminal_job_status_uses_exit_code_and_timeout_not_output_words(self):
+        for exit_code, timed_out, expected in ((None, False, True), (0, False, True),
+                                                (1, False, False), (0, True, False)):
+            with self.subTest(exit_code=exit_code, timed_out=timed_out):
+                job = SimpleNamespace(
+                    id="a" * 12, ready=threading.Event(), timed_out=timed_out,
+                    process=Mock(returncode=exit_code, poll=Mock(return_value=exit_code)),
+                    read_offset=0, output_start=0, total_bytes=16,
+                    output=bytearray(b"denied cancelled"),
+                )
+                manager = TerminalJobManager(Path.cwd())
+                with patch.object(manager, "_get", return_value=job):
+                    result = manager.read(job.id, wait_seconds=0)
+                self.assertEqual(result.success, expected)
+                self.assertIn("denied cancelled", result)
+                manager.close()
     def test_read_file_rejects_paths_outside_project(self):
         with tempfile.TemporaryDirectory() as folder:
             with self.assertRaisesRegex(ValueError, "inside the project"):

@@ -1,8 +1,10 @@
 import tempfile
+import subprocess
 import threading
 import unittest
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from PIL import Image
@@ -12,9 +14,118 @@ from src.images import prepare_image
 from src.providers.types import ModelResponse, ProviderRequestError, ToolCall
 from src.tools.registry import tool_schemas
 from src.tools.computer_session import ComputerResult
+from src.mcp.adapter import result_text
 
 
 class ConversationLoopTests(unittest.TestCase):
+    def test_diagnostics_use_execution_status_instead_of_output_words(self):
+        mcp_error = result_text(SimpleNamespace(
+            content=[SimpleNamespace(text="TimeoutError: connection failed")],
+            structured_content=None, is_error=True,
+        ))
+        for output, success in (
+            ("Your order was cancelled. Access denied is a common error.", True),
+            ("Tool error: this is an example in the file being read.", True),
+            (mcp_error, False),
+            (ComputerResult('{"action_outcome":{"effect":"unknown"}}',
+                            success=False, action_effect="unknown"), False),
+            (InterruptedError("stopped"), False),
+        ):
+            with self.subTest(output=str(output)):
+                events = []
+                complete = Mock(side_effect=[
+                    ModelResponse(tool_calls=[ToolCall("read", "read_file", {"path": "a.txt"})]),
+                    ModelResponse("Done."),
+                ])
+                with tempfile.TemporaryDirectory() as folder, \
+                     patch("src.agent.skills.discover_skills", return_value=({}, [])), \
+                     patch("src.agent.conversation_loop.execute_tool") as execute:
+                    if isinstance(output, Exception):
+                        execute.side_effect = output
+                    else:
+                        execute.return_value = output
+                    history = [{"role": "user", "content": "Read the file."}]
+                    run_turn(history, complete, tool_schemas(), Path(folder), Mock(), Mock(),
+                             on_diagnostic=lambda _, event: events.append(event))
+                end = next(e for e in events if e["type"] == "tool_end")
+                self.assertEqual(end["success"], success)
+                if isinstance(output, ComputerResult):
+                    self.assertEqual(end["action_effect"], "unknown")
+                elif not isinstance(output, Exception):
+                    self.assertEqual(history[2]["content"], output)
+
+    def test_native_tool_failures_and_denials_are_reported_without_text_matching(self):
+        for name, args, command_result, approved, expected in (
+            ("terminal", {"command": "fixture"},
+             subprocess.CompletedProcess([], 0, "denied cancelled", ""), True, True),
+            ("terminal", {"command": "fixture"},
+             subprocess.CompletedProcess([], 1, "", "failed"), True, False),
+            ("terminal", {"command": "fixture"}, subprocess.TimeoutExpired("fixture", 30), True, False),
+            ("terminal", {"command": "fixture"}, None, False, False),
+            ("write_file", {"path": "new.txt", "content": "hello"}, None, False, False),
+            ("unknown_fixture_tool", {}, None, True, False),
+        ):
+            with self.subTest(name=name, approved=approved, command_result=command_result):
+                events = []
+                complete = Mock(side_effect=[
+                    ModelResponse(tool_calls=[ToolCall("call", name, args)]), ModelResponse("Done."),
+                ])
+                with tempfile.TemporaryDirectory() as folder, \
+                     patch("src.agent.skills.discover_skills", return_value=({}, [])), \
+                     patch("src.tools.terminal_tool.shutil.which", return_value="/fake/bwrap"), \
+                     patch("src.tools.terminal_tool.subprocess.run") as run:
+                    if isinstance(command_result, Exception):
+                        run.side_effect = command_result
+                    else:
+                        run.return_value = command_result
+                    run_turn([{"role": "user", "content": "Run fixture."}], complete, tool_schemas(),
+                             Path(folder), Mock(return_value=approved), Mock(return_value=approved),
+                             on_diagnostic=lambda _, event: events.append(event))
+                    if not approved:
+                        run.assert_not_called()
+                        self.assertFalse((Path(folder) / "new.txt").exists())
+                self.assertEqual(next(e for e in events if e["type"] == "tool_end")["success"], expected)
+
+    def test_delegation_status_does_not_depend_on_words_in_findings(self):
+        for status in ("completed", "failed", "timed_out", "limit_reached", "cancelled"):
+            with self.subTest(status=status):
+                events = []
+                complete = Mock(side_effect=[ModelResponse(tool_calls=[ToolCall(
+                    "worker", "delegate_read_only", {"task": "Inspect the file."},
+                )]), ModelResponse("Done.")])
+                with tempfile.TemporaryDirectory() as folder, \
+                     patch("src.agent.skills.discover_skills", return_value=({}, [])), \
+                     patch("src.agent.subagents.run_read_only_subagent", return_value={
+                         "status": status, "findings": "The log mentions denied and cancelled.",
+                     }):
+                    run_turn([{"role": "user", "content": "Inspect."}], complete, tool_schemas(),
+                             Path(folder), Mock(), Mock(),
+                             on_diagnostic=lambda _, event: events.append(event))
+                self.assertEqual(next(e for e in events if e["type"] == "tool_end")["success"],
+                                 status == "completed")
+
+    def test_mcp_approval_denial_is_failed_without_running_the_tool(self):
+        name = "mcp__playwright__browser_click"
+        mcp = SimpleNamespace(
+            tool_directory=lambda: [{"server": "playwright", "state": "connected"}],
+            diagnostic_snapshot=lambda: {},
+            tool_schemas=lambda _: [{"type": "function", "name": name, "description": "Click",
+                                      "parameters": {"type": "object", "properties": {}}}],
+            requires_approval=lambda *_: True, call_tool=Mock(),
+        )
+        complete = Mock(side_effect=[
+            ModelResponse(tool_calls=[ToolCall("load", "load_mcp_tools", {"server": "playwright"})]),
+            ModelResponse(tool_calls=[ToolCall("click", name, {})]), ModelResponse("Done."),
+        ])
+        events = []
+        with tempfile.TemporaryDirectory() as folder:
+            run_turn([{"role": "user", "content": "Click."}], complete, tool_schemas(),
+                     Path(folder), Mock(), Mock(), mcp_client=mcp, confirm_mcp=lambda *_: False,
+                     on_diagnostic=lambda _, event: events.append(event))
+        ends = [e["success"] for e in events if e["type"] == "tool_end"]
+        self.assertEqual(ends, [True, False])
+        mcp.call_tool.assert_not_called()
+
     def test_builtin_computer_guide_is_omitted_only_when_already_supplied_and_not_named(self):
         from src.agent.skills import discover_skills
         from src.tools.computer_session import COMPUTER_INSTRUCTIONS

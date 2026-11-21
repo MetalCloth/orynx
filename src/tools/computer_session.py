@@ -129,6 +129,8 @@ class ComputerResult:
     images: list[dict[str, Any]] = field(default_factory=list)
     history_text: str | None = None
     observation_scope: str | None = None
+    success: bool = True
+    action_effect: str | None = None
 
 
 class ActionNotDispatched(RuntimeError):
@@ -901,7 +903,8 @@ class ComputerSession:
             "next": "Use the fresh observation below and its observation_id for the next computer call.",
         }, ensure_ascii=False) + "\n"
         return ComputerResult(prefix + observation.text, observation.images,
-                              prefix + (observation.history_text or observation.text), observation.observation_scope)
+                              prefix + (observation.history_text or observation.text), observation.observation_scope,
+                              success=False, action_effect=None if wait else "refused")
 
     @staticmethod
     def _action(snapshot: dict, value: Any) -> dict:
@@ -1748,6 +1751,10 @@ class ComputerSession:
             "dispatch_mode": dispatch_mode,
         })
         result["expected_result"] = expected_result
+        effect = next(
+            (outcome["effect"] for outcome in outcomes if outcome["effect"] in {"unknown", "refused"}),
+            outcomes[-1]["effect"],
+        )
         result["verify_state"] = verification
         if len(actions) > 1 and not sequence_complete:
             result["next"] = "Earlier steps may have run. Inspect fresh state before repairing or retrying."
@@ -1770,7 +1777,8 @@ class ComputerSession:
             return ComputerResult(json.dumps({**result,
                                               "observation_error": str(exc),
                                               "screenshot_included": False,
-                                              "next": "Observe windows or desktop before any further input."}, ensure_ascii=False))
+                                              "next": "Observe windows or desktop before any further input."}, ensure_ascii=False),
+                                  success=False, action_effect=effect)
         if (sequence_complete and len(actions) == 1 and actions[0]["type"] == "key"
                 and image_requested):
             try:
@@ -1796,7 +1804,8 @@ class ComputerSession:
         )
         prefix = json.dumps(result, ensure_ascii=False) + "\n"
         return ComputerResult(prefix + observation.text, observation.images,
-                              prefix + (observation.history_text or observation.text), observation.observation_scope)
+                              prefix + (observation.history_text or observation.text), observation.observation_scope,
+                              success=sequence_complete, action_effect=effect)
 
     @staticmethod
     def validate_question(args: dict[str, Any]) -> str:

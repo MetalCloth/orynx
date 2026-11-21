@@ -14,6 +14,7 @@ from src.tools.file_tools import (
     write_file,
 )
 from src.tools.git_tools import git_diff, git_status
+from src.tools.results import ToolResult
 from src.tools.terminal_tool import TerminalJobManager, run_terminal
 from src.tools.web_tools import web_extract, web_search
 
@@ -411,5 +412,8 @@ def execute_tool(name: str, arguments: dict[str, Any], project_root: Path,
     elif name == "browser_back":
         result = browser.back()
     else:
-        return f"Unknown tool '{name}'. Use one of: {', '.join(tool['name'] for tool in tool_schemas())}."
+        return ToolResult(
+            f"Unknown tool '{name}'. Use one of: {', '.join(tool['name'] for tool in tool_schemas())}.",
+            success=False,
+        )
     return result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)

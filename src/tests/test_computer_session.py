@@ -18,6 +18,24 @@ from src.tools.computer_session import (
 
 
 class ComputerActionBatchTests(unittest.TestCase):
+    def test_action_diagnostics_preserve_sent_refused_and_unknown_effects(self):
+        for failure, effect, success in (
+            (None, "sent", True),
+            (ActionNotDispatched("dotool", "target_changed", "No input sent."), "refused", False),
+            (RuntimeError("Input effect uncertain."), "unknown", False),
+        ):
+            with self.subTest(effect=effect):
+                session = self._session()
+                with patch.object(session, "_dotool_keyboard_sequence", side_effect=failure), \
+                     patch.object(session, "_fresh_after", side_effect=self._fresh_observation(session)):
+                    result = session.act({
+                        "observation_id": "current",
+                        "action": [{"type": "type", "text": "fixture"}, {"type": "key", "key": "enter"}],
+                        "expected_result": "The fixture changes.",
+                    })
+                self.assertEqual(result.success, success)
+                self.assertEqual(result.action_effect, effect)
+
     def test_only_fixed_same_window_text_patterns_use_single_stream(self):
         snapshot = {"mode": "window", "pid": 123}
         self.assertTrue(ComputerSession._batchable_keyboard_sequence(snapshot, [

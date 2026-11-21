@@ -4,6 +4,8 @@ import json
 import re
 from typing import Any
 
+from src.tools.results import ToolResult
+
 
 _MODEL_TOOL_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 _ARIA_HIDDEN_NODE = re.compile(
@@ -216,7 +218,7 @@ def result_text(
         parts.append("MCP tool returned no readable text.")
     text = "\n".join(parts)
     if result.is_error:
-        return f"MCP server reported a tool error:\n{text}"
+        return ToolResult(f"MCP server reported a tool error:\n{text}", success=False)
     if server_name == "playwright":
         if tool_name == "browser_tabs":
             return text

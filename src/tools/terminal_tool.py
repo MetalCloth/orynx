@@ -13,6 +13,8 @@ import uuid
 from pathlib import Path
 from typing import Callable
 
+from src.tools.results import ToolResult
+
 
 MAX_COMMAND_OUTPUT_CHARS = 20_000
 MAX_JOB_BUFFER_BYTES = 200_000
@@ -71,7 +73,7 @@ def run_terminal(command: str, project_root: Path, confirm: Callable[[str], bool
         raise ValueError("Command is empty. Provide a shell command to run.")
     root = validate_project_root(project_root)
     if not confirm(command):
-        return "Command cancelled by the user."
+        return ToolResult("Command cancelled by the user.", success=False)
     bubblewrap = shutil.which("bwrap")
     if not bubblewrap:
         raise RuntimeError("Terminal tool needs bubblewrap (bwrap) for project isolation; install it and retry.")
@@ -90,11 +92,15 @@ def run_terminal(command: str, project_root: Path, confirm: Callable[[str], bool
         if len(output) > MAX_COMMAND_OUTPUT_CHARS:
             output = output[:MAX_COMMAND_OUTPUT_CHARS] + "\n[output truncated at 20,000 characters]"
         detail = f"\nPartial output:\n{output}" if output else ""
-        return f"Command timed out after 30 seconds.{detail} Use terminal jobs for longer commands."
+        return ToolResult(
+            f"Command timed out after 30 seconds.{detail} Use terminal jobs for longer commands.",
+            success=False,
+        )
     output = result.stdout + result.stderr
     if len(output) > MAX_COMMAND_OUTPUT_CHARS:
         output = output[:MAX_COMMAND_OUTPUT_CHARS] + "\n[output truncated at 20,000 characters]"
-    return f"Exit code: {result.returncode}\n{output}" if output else f"Exit code: {result.returncode}"
+    text = f"Exit code: {result.returncode}\n{output}" if output else f"Exit code: {result.returncode}"
+    return ToolResult(text, success=result.returncode == 0)
 
 
 @dataclass
@@ -128,7 +134,7 @@ class TerminalJobManager:
         if self._closed:
             raise RuntimeError("This chat's terminal job manager is closed.")
         if not confirm(command):
-            return "Command cancelled by the user."
+            return ToolResult("Command cancelled by the user.", success=False)
         bubblewrap = shutil.which("bwrap")
         if not bubblewrap:
             raise RuntimeError("Terminal tool needs bubblewrap (bwrap) for project isolation; install it and retry.")
@@ -194,7 +200,10 @@ class TerminalJobManager:
                 next_step = "The process has exited."
             if job.total_bytes > MAX_JOB_BUFFER_BYTES:
                 overflow += f"[Captured {job.total_bytes:,} output bytes; older data may have been discarded.]\n"
-            return f"Terminal job {job.id} · {status}\n{overflow}{output}\n{next_step}"
+            return ToolResult(
+                f"Terminal job {job.id} · {status}\n{overflow}{output}\n{next_step}",
+                success=not job.timed_out and job.process.returncode in (None, 0),
+            )
 
     def send_input(
         self, job_id: str, text: str, confirm: Callable[[str], bool],
@@ -205,7 +214,7 @@ class TerminalJobManager:
         if job.process.poll() is not None:
             raise RuntimeError(f"Terminal job {job.id} has already exited.")
         if not confirm(f"Terminal input to job {job.id}:\n{text}"):
-            return "Terminal input cancelled by the user; nothing was sent."
+            return ToolResult("Terminal input cancelled by the user; nothing was sent.", success=False)
         if job.process.poll() is not None:
             raise RuntimeError(f"Terminal job {job.id} exited while approval was pending.")
         data = text.encode("utf-8")
